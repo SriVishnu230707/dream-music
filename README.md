@@ -1,59 +1,65 @@
 # Mood Drift Music
 
-**A mood-aware, personalized music recommendation and playback project.**
+**Mood-aware, personalized music recommendation with adaptive playback.**
 
-Mood Drift Music creates a listening session that begins near how a person feels now and gradually moves toward how they want to feel. It combines a mood signal, the listener's music preferences, and feedback from the current session to choose and sequence songs.
+> **Status:** Project design. The application, datasets, and trained models have not been implemented yet.
 
-> **Project status:** Design stage. This README describes the intended system and a practical build path; no application or trained model is included yet.
+## Overview
 
-## The idea
+Mood Drift Music starts a listening session with a short text check-in, learns what the listener tends to enjoy, and selects a sequence of songs that moves gradually from the current mood toward a chosen target. The sequence adapts to feedback during playback.
 
-Most recommenders use past listening behavior to predict what someone generally likes. This project adds the emotional context of a particular session. A listener might start feeling low, choose a calmer or more positive target mood, and receive a playlist that changes gradually rather than jumping straight to high-energy songs.
+The project combines natural language emotion classification, hybrid recommendation, and playlist sequencing in a two-dimensional **valence–arousal** space. Valence describes negative to positive feeling; arousal describes low to high energy. Each song occupies a point in that space, based on available audio features or mood annotations.
 
 ```text
-Mood check-in + target mood
-           │
-           ▼
-    Valence/arousal path  ←  User taste profile
-           │                       │
-           └──────────┬────────────┘
-                      ▼
-            Ranked song sequence
-                      │
-                      ▼
-              Playback + feedback
-                      │
-                      └──► Re-rank upcoming songs
+Text check-in ─► Mood classifier ─► Starting mood ─┐
+                                                   ├─► Drift path ─► Song ranking ─► Playback
+Target mood ────────────────────────────────────────┘                     ▲              │
+                                                                         │              ▼
+Listening history ─► Taste model ─► Candidate songs ─────────────────────┘        Feedback events
+                                                                                      │
+                                                                                      └─► Re-rank queue
 ```
+
+## Problem
+
+Listening history and collaborative filtering capture broad taste, but they do not necessarily explain what a person wants to hear in a particular emotional context. Generic mood playlists capture context but may ignore individual preferences. This project studies whether combining both signals, then sequencing tracks along a gradual mood path, produces a more relevant listening session.
 
 ## Goals
 
-- Accept a mood check-in and a user-selected target mood.
-- Learn music preferences from likes, skips, replays, and listening history.
-- Build a playlist that balances personal taste with a gradual emotional trajectory.
-- Adapt upcoming choices as the listener gives feedback.
-- Compare the system with taste-only and popularity-based baselines.
+- Infer a starting mood from a short text entry, with a manual correction option.
+- Model personal taste from song content and historical interactions.
+- Generate a playlist that balances taste, mood fit, diversity, and smooth transitions.
+- Play the selected tracks and adapt upcoming selections using session feedback.
+- Evaluate the result against popularity-based and taste-only baselines.
 
-## Initial scope
+## Recommendation pipeline
 
-The first version uses **manual mood selection**. This gives the system a clear input and lets the recommendation and sequencing logic be evaluated independently. Text-based mood classification is a later extension. Facial-expression and voice analysis are outside the initial scope.
+### 1. Detect the starting mood
 
-Each session has a starting mood, a target mood, and a requested number of songs. A mood is represented by two values in the range `[0, 1]`:
+Train a text classifier on an emotion-labeled corpus such as GoEmotions or ISEAR. Start with **TF-IDF + Logistic Regression or a linear SVM**. Compare a fine-tuned **DistilBERT** model only if the baseline leaves a meaningful accuracy gap. Map predicted emotion labels to valence–arousal coordinates and retain uncertainty; allow the listener to correct the prediction.
 
-- **Valence:** negative to positive feeling.
-- **Arousal:** low to high energy.
+The text check-in should be optional. A manual mood selector provides an accessible fallback and a useful baseline for testing the rest of the system.
 
-The listener chooses the target. The application should present the path as a listening preference, not a promise to change a person's emotional state.
+### 2. Learn the listener's taste
 
-## How recommendations work
+- **Content-based model:** Represent tracks using available genre, artist, tempo, energy, valence, and other permitted metadata. Build a user vector from liked and completed tracks, with lower weights for weak signals.
+- **Collaborative model:** When enough interaction data exists, train a matrix-factorization model such as SVD or ALS to discover songs enjoyed by listeners with similar patterns.
+- **Hybrid candidate set:** Combine both models and reserve a small share for exploration. Handle cold-start users with stated preferences and content-based recommendations.
 
-1. **Build candidates.** Gather tracks from the listener's preferred artists, genres, languages, and previously liked material, plus a small exploration pool.
-2. **Create a path.** Interpolate from the starting mood to the target mood across the requested number of songs.
-3. **Score each track.** Combine taste affinity, distance from that step's mood point, novelty, and diversity. Penalize recently played tracks and repeats within the playlist.
-4. **Sequence the list.** Choose the highest-scoring eligible track at each step while limiting abrupt changes between adjacent songs.
-5. **Adapt.** Use likes, skips, replays, and optional mood check-ins to update the remaining sequence. Feedback indicates preference; it should not be treated as a reliable measurement of emotional change by itself.
+Skips and short listens are noisy signals. They should adjust rankings cautiously rather than be treated as certain dislikes.
 
-A simple starting score is:
+### 3. Build a mood drift path
+
+Let the starting mood be `s = (valence, arousal)` and the listener's target be `t`. For a session of `N` songs, a simple path is:
+
+```text
+path[i] = (1 - αᵢ) × s + αᵢ × t
+αᵢ = i / (N - 1), for i = 0 … N - 1
+```
+
+The default experience asks the listener to select the target. An optional calm or more-positive suggestion may be offered, but the system does not assume that every listener wants their mood changed. The path is a playlist design choice, not a therapeutic claim.
+
+At each step, rank eligible songs by personal taste, distance from the step's target point, novelty, and transition quality. Avoid repeats and large jumps between adjacent songs. A baseline scoring function is:
 
 ```text
 score(song, step) =
@@ -64,68 +70,79 @@ score(song, step) =
   - w_jump    × transition_cost(previous_song, song)
 ```
 
-Normalize component scores before combining them. Tune the weights against held-out sessions and user feedback rather than assuming one set works for everyone.
+Normalize the terms and tune weights on held-out data. A nearest-neighbor index such as pgvector or FAISS can narrow the candidate pool when the catalog grows.
 
-## Proposed architecture
+### 4. Play and adapt
 
-| Layer | Proposed technology | Responsibility |
+During playback, collect skips, replays, likes, and listen-through duration. Re-rank only upcoming tracks so the current song is not interrupted. Offer a lightweight mood check-in during longer sessions; that explicit signal is more informative about emotional state than engagement alone. A contextual bandit is a later experiment, after a transparent rule-based feedback loop is working and measurable.
+
+## Proposed technology stack
+
+| Layer | Technology | Responsibility |
 | --- | --- | --- |
-| Web client | React, TypeScript, Tailwind CSS | Mood check-in, playlist, playback controls, feedback |
-| Application API | Go | Sessions, candidate ranking, sequencing, feedback ingestion |
-| ML service | Python, FastAPI, scikit-learn | Taste features and optional text mood inference |
-| Data | PostgreSQL | Users, tracks, interactions, sessions, model features |
-| Playback provider | Provider adapter | Track lookup and playback where permitted by provider access |
-| Local development | Docker Compose | Run the services and database together |
+| Frontend | React, TypeScript, Tailwind CSS | Check-in, target selection, playlist, playback controls, feedback |
+| Backend for frontend | Node.js with Fastify or Express | OAuth and frontend-facing aggregation, if provider integration requires it |
+| Core API | Go with Gin or Fiber | Recommendations, session state, feedback ingestion |
+| ML service | Python with FastAPI, scikit-learn, optional Transformers | Mood inference, taste features, model serving |
+| Database | PostgreSQL; optional pgvector | Profiles, tracks, interactions, sessions, vector search |
+| Cache | Redis, when needed | Session state, hot rankings, rate limits |
+| Live updates | WebSockets, when needed | Check-ins and queue updates |
+| Local development | Docker Compose | Run app services and data stores |
 
-Start with one Go API and one Python ML service. Add Redis, a vector index, WebSockets, or a separate Node BFF only when measurement or integration needs justify them. Provider APIs, catalog access, playback entitlements, and audio-feature availability must be verified before choosing an integration. A local catalog with licensed or permitted audio clips can support the first end-to-end demo.
+The initial implementation can start with React, one Go API, one Python service, and PostgreSQL. Split services or add Redis and WebSockets when their benefits are demonstrated. Use REST between services first; gRPC remains an option if the interfaces and traffic justify it.
 
-## Data and model plan
+## Playback and catalog
 
-| Data | Purpose |
+Spotify integration is a proposed provider option: OAuth, track metadata/search, and browser playback through the Web Playback SDK where the account and application are eligible. **Verify current API access, audio-feature availability, playback entitlements, and platform terms before implementation.** Do not assume every catalog track exposes valence and energy. A licensed or otherwise permitted demo catalog can provide an end-to-end fallback; Jamendo or Free Music Archive are possible sources subject to their current terms and available audio.
+
+## Data plan
+
+| Dataset or event | Use |
 | --- | --- |
-| Track metadata and mood features | Locate songs in valence/arousal space and explain selections |
-| User interactions | Estimate taste and evaluate ranking |
-| Session events | Update upcoming recommendations |
-| Optional mood-labeled text | Train and test a later text mood classifier |
+| GoEmotions or ISEAR | Train and evaluate text emotion classification |
+| Track audio features or mood annotations | Place songs in valence–arousal space |
+| User–song interactions | Train taste models and evaluate ranking |
+| Session events and optional check-ins | Adapt the upcoming queue and evaluate sessions |
 
-For the first version, use a content-based taste profile and manually mapped or dataset-provided track mood features. Evaluate the quality and provenance of any dataset before use. Add collaborative filtering only after there are enough users and interactions to support it.
+Check each dataset's license, coverage, label quality, and compatibility with the chosen playback catalog. Training and test splits should be separated by user or time where appropriate to avoid leakage.
 
-## Evaluation
+## Evaluation plan
 
-Compare three playlist strategies on the same candidate catalog and test sessions:
+| Component | Measures |
+| --- | --- |
+| Mood classifier | Accuracy, macro F1, per-class F1, confusion matrix, calibration |
+| Taste ranking | Precision@K, Recall@K, NDCG@K, cold-start performance |
+| Drift sequence | Mood-path distance, transition smoothness, diversity |
+| Listening session | Skip rate, completion rate, session length, listener-rated relevance and coherence |
 
-1. **Popularity baseline:** popular eligible songs.
-2. **Taste-only baseline:** songs ranked by preference, without a mood path.
-3. **Mood drift:** taste-aware songs sequenced along the chosen path.
+Compare **popularity**, **taste-only**, and **mood-aware drift** strategies on the same catalog and user sessions. Use explicit before/after check-ins and subjective ratings when studying perceived mood change; engagement metrics alone cannot establish mood improvement or causality. Report sample size and uncertainty, and separate offline ranking results from user-study findings.
 
-Measure `precision@k` or `NDCG@k` for preference relevance, skip and completion rates for engagement, and distance from each playlist step to its intended mood point for sequence fit. Use explicit listener ratings to assess whether transitions feel coherent and whether the session matches the selected target. Report results by starting mood and user group, with confidence intervals where sample size permits.
+## Milestones
 
-## Build path
-
-- [ ] Define a track schema, mood mapping, and small legal demo catalog.
-- [ ] Build the manual mood check-in and target selection screens.
-- [ ] Implement taste scoring and a taste-only baseline.
-- [ ] Implement drift path generation, ranking, and transition rules.
-- [ ] Add playback through the selected provider or local demo catalog.
-- [ ] Record likes, skips, replays, and optional check-ins; re-rank the remaining queue.
-- [ ] Run offline evaluation and a small user study against the baselines.
-- [ ] Add text mood inference if it improves the experience over manual selection.
+1. **Data and baseline:** Document datasets, define track and event schemas, create a legal demo catalog, and train the TF-IDF classifier.
+2. **Personalization:** Build a content-based taste model and popularity/taste-only baselines. Add collaborative filtering when data volume supports it.
+3. **Sequencing:** Implement valence–arousal interpolation, weighted ranking, repeat limits, and transition constraints.
+4. **Application:** Build the React check-in and player UI, Go session API, Python inference service, and PostgreSQL persistence.
+5. **Playback and feedback:** Integrate an eligible playback provider or demo catalog; capture events and adapt the remaining queue.
+6. **Evaluation:** Run offline tests and user sessions; compare the three strategies and iterate on observed weaknesses.
+7. **Advanced experiments:** Test DistilBERT, vector retrieval, and contextual bandits only after the baseline is measured.
 
 ## Privacy and responsible use
 
-Mood check-ins can be sensitive. Store only what is needed for the session, explain how it is used, allow deletion, and obtain consent before retaining mood history. Present the system as a music discovery experience, not as a mental-health treatment or diagnostic tool.
+Mood entries may contain sensitive personal information. Minimize collection and retention, obtain consent for stored check-ins, protect session data, and let users delete it. Present the product as a music discovery experience rather than a mental-health diagnostic or treatment system.
 
-## Repository layout (planned)
+## Planned repository layout
 
 ```text
 apps/web/           React client
-services/api/       Go application API
-services/ml/        Python model training and inference
+services/bff/       Optional Node.js provider integration
+services/api/       Go API, recommendation and session logic
+services/ml/        Python training and inference
 data/               Dataset documentation and sample schemas
 docs/               Design decisions and evaluation reports
-compose.yaml        Local development services
+compose.yaml        Local services
 ```
 
 ## Getting started
 
-The repository currently contains the project design only. Follow the build path above to implement the first version. Setup commands, environment variables, and provider credentials will be documented here once the corresponding services exist.
+This repository currently contains the design only. Setup commands, environment variables, and provider credentials will be documented as each service is implemented.
