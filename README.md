@@ -20,6 +20,8 @@ Listening history ─► Taste model ─► Candidate songs ──────�
                                                                                       └─► Re-rank queue
 ```
 
+For a step-by-step breakdown of the requirements, models, integration points, and success criteria, see the [problem analysis](docs/PROBLEM_ANALYSIS.md).
+
 ## Problem
 
 Listening history and collaborative filtering capture broad taste, but they do not necessarily explain what a person wants to hear in a particular emotional context. Generic mood playlists capture context but may ignore individual preferences. This project studies whether combining both signals, then sequencing tracks along a gradual mood path, produces a more relevant listening session.
