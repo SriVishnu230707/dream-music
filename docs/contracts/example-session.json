@@ -1,0 +1,30 @@
+{
+  "request": {
+    "userId": "demo-user-1",
+    "checkInText": "I feel low and want to ease into a brighter mood.",
+    "startMood": {"valence": 0.2, "arousal": 0.2, "source": "user-corrected", "confidence": null},
+    "targetMood": {"valence": 0.8, "arousal": 0.6},
+    "trackCount": 4,
+    "taste": {"preferredGenres": ["ambient", "pulse"], "likedTrackIds": ["soft-shadow", "bright-motion"]}
+  },
+  "illustrativeResponse": {
+    "sessionId": "demo-session-1",
+    "status": "ready",
+    "catalogId": "generated-demo-v1",
+    "revision": 1,
+    "queue": [
+      {"position": 0, "trackId": "night-rain", "pathPoint": {"valence": 0.2, "arousal": 0.2}, "score": 0.81, "reason": "Ambient preference; close to the starting mood."},
+      {"position": 1, "trackId": "dusk-window", "pathPoint": {"valence": 0.4, "arousal": 0.3333}, "score": 0.77, "reason": "A gradual move toward a brighter mood."},
+      {"position": 2, "trackId": "morning-light", "pathPoint": {"valence": 0.6, "arousal": 0.4667}, "score": 0.74, "reason": "Ambient style near the next path point."},
+      {"position": 3, "trackId": "bright-motion", "pathPoint": {"valence": 0.8, "arousal": 0.6}, "score": 0.79, "reason": "Liked pulse style near the target mood."}
+    ]
+  },
+  "exampleEvent": {
+    "eventId": "demo-event-1",
+    "sessionId": "demo-session-1",
+    "trackId": "night-rain",
+    "type": "complete",
+    "occurredAt": "2026-09-23T12:00:00Z",
+    "listenedSeconds": 12
+  }
+}

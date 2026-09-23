@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mood-drift:track:1",
+  "title": "Mood Drift track v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "artist", "genre", "bpm", "keyMidi", "mode", "mood", "audio", "attribution"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "title": {"type": "string", "minLength": 1},
+    "artist": {"type": "string", "minLength": 1},
+    "genre": {"type": "string", "enum": ["ambient", "pulse"]},
+    "bpm": {"type": "integer", "minimum": 40, "maximum": 200},
+    "keyMidi": {"type": "integer", "minimum": 36, "maximum": 84},
+    "mode": {"type": "string", "enum": ["major", "minor"]},
+    "mood": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valence", "arousal", "provenance"],
+      "properties": {
+        "valence": {"type": "number", "minimum": 0, "maximum": 1},
+        "arousal": {"type": "number", "minimum": 0, "maximum": 1},
+        "provenance": {"type": "string", "enum": ["design-proxy", "human-annotation", "model-estimate"]}
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "source", "rights", "durationSeconds"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^audio/generated/[a-z0-9-]+\\.wav$"},
+        "source": {"type": "string", "enum": ["project-generated"]},
+        "rights": {"type": "string", "enum": ["project-original-demo"]},
+        "durationSeconds": {"type": "integer", "minimum": 1, "maximum": 60}
+      }
+    },
+    "attribution": {"type": "string", "minLength": 1}
+  }
+}

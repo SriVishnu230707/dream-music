@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mood-drift:feedback-event:1",
+  "title": "Session feedback event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "sessionId", "trackId", "type", "occurredAt"],
+  "properties": {
+    "eventId": {"type": "string", "minLength": 1},
+    "sessionId": {"type": "string", "minLength": 1},
+    "trackId": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "enum": ["start", "skip", "complete", "replay", "like"]},
+    "occurredAt": {"type": "string", "format": "date-time"},
+    "listenedSeconds": {"type": "number", "minimum": 0}
+  }
+}

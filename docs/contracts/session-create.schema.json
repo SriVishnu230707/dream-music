@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mood-drift:session-create:1",
+  "title": "Create session request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["userId", "startMood", "targetMood", "trackCount", "taste"],
+  "properties": {
+    "userId": {"type": "string", "minLength": 1},
+    "checkInText": {"type": ["string", "null"], "maxLength": 1000},
+    "startMood": {"$ref": "#/$defs/moodInput"},
+    "targetMood": {"$ref": "#/$defs/coordinate"},
+    "trackCount": {"type": "integer", "minimum": 1, "maximum": 20},
+    "taste": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferredGenres", "likedTrackIds"],
+      "properties": {
+        "preferredGenres": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "likedTrackIds": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "coordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valence", "arousal"],
+      "properties": {
+        "valence": {"type": "number", "minimum": 0, "maximum": 1},
+        "arousal": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "moodInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valence", "arousal", "source"],
+      "properties": {
+        "valence": {"type": "number", "minimum": 0, "maximum": 1},
+        "arousal": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "string", "enum": ["manual", "text-model", "user-corrected"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

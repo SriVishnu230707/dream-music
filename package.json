@@ -1,0 +1,14 @@
+{
+  "name": "mood-drift-music-phase0",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "generate:demo": "node scripts/generate-demo-catalog.mjs",
+    "verify:phase0": "node scripts/verify-phase0.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.0.0",
+    "ajv-formats": "^3.0.0"
+  }
+}
