@@ -6,3 +6,9 @@ data/catalog/audio/generated/
 .env.*
 !*.example
 node_modules/
+
+# Phase 1 reproducible downloads and generated datasets
+data/raw/
+data/processed/
+__pycache__/
+*.pyc
