@@ -56,8 +56,11 @@ Let the starting mood be `s = (valence, arousal)` and the listener's target be `
 
 ```text
 path[i] = (1 - αᵢ) × s + αᵢ × t
-αᵢ = i / (N - 1), for i = 0 … N - 1
+αᵢ = i / (N - 1), for i = 0 … N - 1 when N > 1
+α₀ = 0 when N = 1
 ```
+
+For a one-song session, use the starting mood as the only path point; there is no transition to interpolate.
 
 The default experience asks the listener to select the target. An optional calm or more-positive suggestion may be offered, but the system does not assume that every listener wants their mood changed. The path is a playlist design choice, not a therapeutic claim.
 
