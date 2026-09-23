@@ -10,5 +10,6 @@ node_modules/
 # Phase 1 reproducible downloads and generated datasets
 data/raw/
 data/processed/
+data/.processed-*/
 __pycache__/
 *.pyc

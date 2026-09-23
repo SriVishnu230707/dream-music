@@ -71,11 +71,74 @@ class DataPipelineTests(unittest.TestCase):
             try:
                 path = prepare_data.RAW / "goemotions" / "emotions.txt"
                 path.parent.mkdir(parents=True)
-                path.write_text("changed", encoding="utf-8")
+                path.write_bytes(b"X" * prepare_data.SOURCE_BYTES["goemotions/emotions.txt"])
                 with self.assertRaisesRegex(ValueError, "Checksum mismatch"):
                     prepare_data.source_file("goemotions/emotions.txt", offline=True)
             finally:
                 prepare_data.RAW = original
+
+    def test_failed_import_preserves_previous_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            original_raw, original_processed = prepare_data.RAW, prepare_data.PROCESSED
+            folder = Path(temp)
+            prepare_data.RAW = folder / "raw"
+            prepare_data.PROCESSED = folder / "processed"
+            prepare_data.PROCESSED.mkdir()
+            marker = prepare_data.PROCESSED / "validation_report.json"
+            marker.write_text('{"report_version":"1.0.0","datasets":{}}', encoding="utf-8")
+            try:
+                with self.assertRaises(FileNotFoundError):
+                    prepare_data.build_pipeline("goemotions", offline=True)
+                self.assertEqual(marker.read_text(encoding="utf-8"), '{"report_version":"1.0.0","datasets":{}}')
+                self.assertEqual(list(folder.glob(".processed-stage-*")), [])
+            finally:
+                prepare_data.RAW, prepare_data.PROCESSED = original_raw, original_processed
+
+    def test_oversized_cached_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            original = prepare_data.RAW
+            prepare_data.RAW = Path(temp)
+            try:
+                path = prepare_data.RAW / "goemotions" / "emotions.txt"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"X" * (prepare_data.SOURCE_BYTES["goemotions/emotions.txt"] + 1))
+                with self.assertRaisesRegex(ValueError, "Size mismatch"):
+                    prepare_data.source_file("goemotions/emotions.txt", offline=True)
+            finally:
+                prepare_data.RAW = original
+
+    def test_unknown_processed_file_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            original = prepare_data.PROCESSED
+            prepare_data.PROCESSED = Path(temp) / "processed"
+            prepare_data.PROCESSED.mkdir()
+            unknown = prepare_data.PROCESSED / "my-notes.txt"
+            unknown.write_text("keep", encoding="utf-8")
+            try:
+                with self.assertRaisesRegex(ValueError, "unexpected processed-data file"):
+                    prepare_data.build_pipeline("seed", offline=True)
+                self.assertEqual(unknown.read_text(encoding="utf-8"), "keep")
+            finally:
+                prepare_data.PROCESSED = original
+
+    def test_single_dataset_keeps_other_processed_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            original = prepare_data.PROCESSED
+            prepare_data.PROCESSED = Path(temp) / "processed"
+            prepare_data.PROCESSED.mkdir()
+            other = prepare_data.PROCESSED / "deam_tracks.jsonl"
+            other.write_text("previous", encoding="utf-8")
+            (prepare_data.PROCESSED / "validation_report.json").write_text(
+                json.dumps({"report_version": "1.0.0", "datasets": {"deam": {"usable_records": 1}}}),
+                encoding="utf-8",
+            )
+            try:
+                report = prepare_data.build_pipeline("seed", offline=True)
+                self.assertEqual(other.read_text(encoding="utf-8"), "previous")
+                self.assertIn("deam", report["datasets"])
+                self.assertIn("seed", report["datasets"])
+            finally:
+                prepare_data.PROCESSED = original
 
 
 if __name__ == "__main__":

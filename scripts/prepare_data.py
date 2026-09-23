@@ -7,7 +7,9 @@ import csv
 import hashlib
 import io
 import json
+import shutil
 import sqlite3
+import tempfile
 import urllib.request
 import wave
 import zipfile
@@ -47,6 +49,25 @@ SOURCES = {
     ),
 }
 
+# Exact sizes bound downloads before checksum verification and catch truncated caches.
+SOURCE_BYTES = {
+    "goemotions/emotions.txt": 248,
+    "goemotions/train.tsv": 3519053,
+    "goemotions/dev.tsv": 439059,
+    "goemotions/test.tsv": 436706,
+    "deam/annotations.zip": 4735283,
+    "deam/metadata.zip": 344760,
+}
+
+MANAGED_OUTPUTS = {
+    "seed_tracks.jsonl", "seed_interactions.jsonl", "seed.sqlite",
+    "goemotions", "goemotions/train.jsonl", "goemotions/dev.jsonl",
+    "goemotions/test.jsonl", "goemotions/model_splits",
+    "goemotions/model_splits/train.jsonl", "goemotions/model_splits/dev.jsonl",
+    "goemotions/model_splits/test.jsonl", "deam_tracks.jsonl",
+    "validation_report.json",
+}
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -58,8 +79,11 @@ def sha256(path: Path) -> str:
 
 def source_file(name: str, offline: bool) -> Path:
     url, expected = SOURCES[name]
+    expected_size = SOURCE_BYTES[name]
     path = RAW / name
     if path.exists():
+        if path.stat().st_size != expected_size:
+            raise ValueError(f"Size mismatch for {path}")
         actual = sha256(path)
         if actual != expected:
             raise ValueError(f"Checksum mismatch for {path}: {actual}")
@@ -70,8 +94,14 @@ def source_file(name: str, offline: bool) -> Path:
     temporary = path.with_name(path.name + ".download")
     try:
         with urllib.request.urlopen(url, timeout=45) as response, temporary.open("wb") as output:
+            downloaded = 0
             while chunk := response.read(1024 * 1024):
+                downloaded += len(chunk)
+                if downloaded > expected_size:
+                    raise ValueError(f"Download exceeds pinned size for {name}")
                 output.write(chunk)
+        if downloaded != expected_size:
+            raise ValueError(f"Downloaded size mismatch for {name}: {downloaded}")
         actual = sha256(temporary)
         if actual != expected:
             raise ValueError(f"Downloaded checksum mismatch for {name}: {actual}")
@@ -275,8 +305,19 @@ def prepare_goemotions(offline: bool) -> dict:
 
 
 def zip_csv(archive: zipfile.ZipFile, name: str) -> list[list[str]]:
+    if archive.getinfo(name).file_size > 10 * 1024 * 1024:
+        raise ValueError(f"Archive member exceeds CSV size limit: {name}")
     with archive.open(name) as source:
-        return list(csv.reader(io.TextIOWrapper(source, encoding="utf-8-sig", errors="replace", newline="")))
+        return list(csv.reader(io.TextIOWrapper(source, encoding="utf-8-sig", errors="strict", newline="")))
+
+
+def assert_managed_directory(folder: Path) -> None:
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError(f"Refusing to replace non-directory or symlink: {folder}")
+    for item in folder.rglob("*"):
+        relative = item.relative_to(folder).as_posix()
+        if item.is_symlink() or relative not in MANAGED_OUTPUTS:
+            raise ValueError(f"Refusing to remove unexpected processed-data file: {item}")
 
 
 def prepare_deam(offline: bool) -> dict:
@@ -357,22 +398,64 @@ def prepare_deam(offline: bool) -> dict:
     }
 
 
+def build_pipeline(dataset: str, offline: bool) -> dict:
+    """Publish an entire processed-data snapshot only after every input succeeds."""
+    global PROCESSED
+    output = PROCESSED
+    data_root = output.parent
+    data_root.mkdir(parents=True, exist_ok=True)
+    backup = data_root / ".processed-previous"
+    if output.exists() or output.is_symlink():
+        assert_managed_directory(output)
+    if backup.exists() or backup.is_symlink():
+        assert_managed_directory(backup)
+        if output.exists():
+            shutil.rmtree(backup)
+        else:
+            backup.rename(output)
+    staged = Path(tempfile.mkdtemp(prefix=".processed-stage-", dir=data_root))
+    report = {"report_version": "1.0.0", "datasets": {}}
+    try:
+        if output.exists() and dataset != "all":
+            shutil.copytree(output, staged, dirs_exist_ok=True)
+            previous_report = staged / "validation_report.json"
+            if previous_report.exists():
+                report = json.loads(previous_report.read_text(encoding="utf-8"))
+        PROCESSED = staged
+        if dataset in ("seed", "all"):
+            report["datasets"]["seed"] = prepare_seed()
+        if dataset in ("goemotions", "all"):
+            report["datasets"]["goemotions"] = prepare_goemotions(offline)
+        if dataset in ("deam", "all"):
+            report["datasets"]["deam"] = prepare_deam(offline)
+        (staged / "validation_report.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8", newline="\n",
+        )
+        PROCESSED = output
+        if output.exists():
+            output.rename(backup)
+        try:
+            staged.rename(output)
+        except OSError:
+            if backup.exists() and not output.exists():
+                backup.rename(output)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    finally:
+        PROCESSED = output
+        if staged.exists():
+            shutil.rmtree(staged)
+    return report
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=["seed", "goemotions", "deam", "all"], default="all")
     parser.add_argument("--offline", action="store_true", help="Use only checksum-verified local source files")
     args = parser.parse_args()
-    report = {"report_version": "1.0.0", "datasets": {}}
-    if args.dataset in ("seed", "all"):
-        report["datasets"]["seed"] = prepare_seed()
-    if args.dataset in ("goemotions", "all"):
-        report["datasets"]["goemotions"] = prepare_goemotions(args.offline)
-    if args.dataset in ("deam", "all"):
-        report["datasets"]["deam"] = prepare_deam(args.offline)
-    PROCESSED.mkdir(parents=True, exist_ok=True)
-    (PROCESSED / "validation_report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    report = build_pipeline(args.dataset, args.offline)
     print(json.dumps({name: {key: value for key, value in data.items() if key in (
         "tracks", "synthetic_interactions", "total_examples", "split_counts", "usable_records", "missing_metadata_ids"
     )} for name, data in report["datasets"].items()}, indent=2))

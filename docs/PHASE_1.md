@@ -14,7 +14,10 @@ python -m unittest discover -s tests -v
 
 The first online run downloads GoEmotions split files plus DEAM metadata and annotations, checks each against a pinned SHA-256 value, and caches them in `data/raw/`. Later runs can use `--offline`. If an upstream file changes, the pipeline stops instead of silently changing the dataset; review and intentionally update its checksum before accepting a new version. Audio from DEAM is not downloaded. `data/raw/`, `data/processed/`, and generated demo WAV files are ignored by Git.
 
-Use `--dataset seed`, `--dataset goemotions`, or `--dataset deam` to prepare one source. Run `--dataset all` for the complete validation report. A subset run rewrites the report with that subset only.
+Source downloads have pinned byte lengths as well as checksums. Processing occurs in a temporary directory and replaces `data/processed/` only after all selected datasets validate. A failed run leaves the previous processed snapshot intact. A subset run keeps the other prepared datasets.
+The pipeline refuses to replace `data/processed/` if it contains an unknown file or symlink, so unrelated local work is preserved.
+
+Use `--dataset seed`, `--dataset goemotions`, or `--dataset deam` to prepare one source. Run `--dataset all` for the complete validation report. A subset run updates that dataset in the existing report.
 
 ## Validation result on 2026-09-24
 
