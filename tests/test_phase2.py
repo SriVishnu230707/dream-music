@@ -1,4 +1,5 @@
-import importlib.util
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,8 +23,6 @@ class MappingTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not importlib.util.find_spec("fastapi"):
-            raise unittest.SkipTest("Install requirements-phase2.txt for API tests")
         from fastapi.testclient import TestClient
         from mood_service.app import app
         cls.client = TestClient(app)
@@ -51,8 +50,21 @@ class ApiTests(unittest.TestCase):
 
     def test_validation_and_confirmed_start(self):
         self.assertEqual(self.client.post("/v1/mood/predict", json={"text": "a" * 1001}).status_code, 422)
+        self.assertEqual(self.client.post("/v1/mood/predict", json={"text": "hello", "extra": 1}).status_code, 422)
         self.assertEqual(self.client.post("/v1/mood/confirm", json={"valence": 2, "arousal": .5, "source": "manual"}).status_code, 422)
+        self.assertEqual(self.client.post("/v1/mood/confirm", json={"valence": "0.2", "arousal": .5, "source": "manual"}).status_code, 422)
         body = self.client.post("/v1/mood/confirm", json={"valence": .2, "arousal": .4,
                                                             "source": "user-corrected"}).json()
         self.assertEqual(body["startMood"], {"valence": .2, "arousal": .4,
                                                 "source": "user-corrected", "confidence": None})
+
+    def test_tampered_model_artifact_is_rejected(self):
+        from mood_service.app import DEFAULT_MODEL_DIR, load_bundle
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            for name in ("model.npz", "vocabulary.json", "evaluation.json"):
+                shutil.copyfile(DEFAULT_MODEL_DIR / name, folder / name)
+            with (folder / "vocabulary.json").open("ab") as output:
+                output.write(b" ")
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                load_bundle(folder)

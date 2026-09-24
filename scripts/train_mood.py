@@ -6,9 +6,9 @@ import argparse
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 
-import joblib
 import numpy as np
 import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -113,28 +113,51 @@ def main() -> None:
             comparison[name]["test_score_analysis"] = score_analysis(test_y, test_scores)
         if name == "logistic_regression":
             chosen = model
-    args.output.mkdir(parents=True, exist_ok=True)
-    model_path = args.output / "model.joblib"
-    joblib.dump({"vectorizer": vectorizer, "classifier": chosen, "labels": LABELS,
-                 "model_version": MODEL_VERSION, "mapping_version": MAPPING_VERSION}, model_path)
-    model_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    report = {
-        "model_version": MODEL_VERSION, "mapping_version": MAPPING_VERSION,
-        "selection": "Logistic regression served for probability output; SVM is an offline benchmark.",
-        "threshold_selection": "Per-model global threshold chosen by dev macro F1; test was not used for tuning.",
-        "training_rows": len(train_text), "dev_rows": len(dev_text), "test_rows": len(test_text),
-        "feature_count": len(vectorizer.vocabulary_), "sklearn_version": sklearn.__version__,
-        "source_sha256": {name: hashlib.sha256((DATA / f"{name}.jsonl").read_bytes()).hexdigest()
-                          for name in ("train", "dev", "test")},
-        "models": comparison,
-        "served_model_sha256": model_hash,
-        "limitations": ["GoEmotions comments are not validated listener check-ins.",
-                        "Emotion-to-coordinate mapping is provisional.",
-                        "Probabilities are not calibrated as personal-mood certainty."],
-    }
-    (args.output / "evaluation.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mood-stage-", dir=args.output.parent) as temporary:
+        stage = Path(temporary)
+        model_path = stage / "model.npz"
+        vocabulary_path = stage / "vocabulary.json"
+        np.savez_compressed(
+            model_path,
+            idf=vectorizer.idf_,
+            coef=np.stack([estimator.coef_[0] for estimator in chosen.estimators_]),
+            intercept=np.array([estimator.intercept_[0] for estimator in chosen.estimators_]),
+        )
+        vocabulary_path.write_text(
+            json.dumps({term: int(index) for term, index in vectorizer.vocabulary_.items()}, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        dev_bins = comparison["logistic_regression"]["dev_score_analysis"]["top_label_precision_by_score"]
+        eligible = [cutoff for cutoff in (0.5, 0.7, 0.9)
+                    if dev_bins[f"at_least_{cutoff:.1f}"]["count"] >= len(dev_text) * 0.2
+                    and (dev_bins[f"at_least_{cutoff:.1f}"]["precision"] or 0) >= 0.70]
+        manual_threshold = min(eligible) if eligible else 1.0
+        report = {
+            "model_version": MODEL_VERSION, "mapping_version": MAPPING_VERSION,
+            "selection": "Logistic regression served for probability output; SVM is an offline benchmark.",
+            "threshold_selection": "Per-model global threshold chosen by dev macro F1.",
+            "training_rows": len(train_text), "dev_rows": len(dev_text), "test_rows": len(test_text),
+            "feature_count": len(vectorizer.vocabulary_), "sklearn_version": sklearn.__version__,
+            "labels": LABELS,
+            "manual_score_threshold": manual_threshold,
+            "manual_threshold_basis": "Smallest tested dev cutoff with >=0.70 top-label precision and >=20% coverage; otherwise always prompt manual selection.",
+            "source_sha256": {name: hashlib.sha256((DATA / f"{name}.jsonl").read_bytes()).hexdigest()
+                              for name in ("train", "dev", "test")},
+            "models": comparison,
+            "artifact_sha256": {name: hashlib.sha256((stage / name).read_bytes()).hexdigest()
+                                for name in ("model.npz", "vocabulary.json")},
+            "limitations": ["GoEmotions comments are not validated listener check-ins.",
+                            "Emotion-to-coordinate mapping is provisional.",
+                            "Probabilities are not calibrated as personal-mood certainty.",
+                            "The test split was inspected during prototype development; treat its metrics as descriptive, not a blind final estimate."],
+        }
+        (stage / "evaluation.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        args.output.mkdir(parents=True, exist_ok=True)
+        for name in ("model.npz", "vocabulary.json", "evaluation.json"):
+            (stage / name).replace(args.output / name)
     print(json.dumps({name: {"dev_macro_f1": result["dev_macro_f1"],
                              "test_macro_f1": result["test"]["macro_f1"]}
                       for name, result in comparison.items()}, indent=2))

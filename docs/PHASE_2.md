@@ -12,13 +12,13 @@ python -m venv .venv
 .\.venv\Scripts\python -m uvicorn mood_service.app:app --host 127.0.0.1 --port 8000
 ```
 
-`models/mood-v1/` contains the local `model.joblib` and `evaluation.json` and is excluded from Git. Rebuild it from the duplicate-free Phase 1 GoEmotions model splits. Only load locally trained, trusted joblib files. The service verifies the artifact hash against its evaluation report at startup.
+`models/mood-v1/` contains local `model.npz`, `vocabulary.json`, and `evaluation.json` and is excluded from Git. Rebuild them from the duplicate-free Phase 1 GoEmotions model splits. The service checks file hashes, array shapes, and finite values before loading data-only artifacts; it does not unpickle model objects.
 
 The training script fits one shared word and bigram TF-IDF vectorizer on **train only**, then compares one-vs-rest logistic regression and linear SVM. It chooses a global decision threshold for each model using dev macro F1 and records held-out test metrics and per-label precision, recall, F1, and support. Logistic regression is served for its probability output; the SVM is an offline benchmark. Its probability is not calibrated as certainty about a person's mood.
 
 ## Prediction and confirmation
 
-`POST /v1/mood/predict` accepts `{ "text": "..." }`, at most 1,000 characters. It returns predicted labels, a provisional `suggestedMood`, model and mapping versions, and `needsManualSelection`. Empty or out-of-vocabulary text has no suggested mood and requires manual selection. Every prediction requires user confirmation. A top-label score below 0.90 also prompts manual selection: on held-out GoEmotions, scores at or above 0.90 covered 1,604 of 5,379 examples with 73.13% top-label precision. That result does not establish performance on personal check-ins.
+`POST /v1/mood/predict` accepts `{ "text": "..." }`, at most 1,000 characters. It returns predicted labels, a provisional `suggestedMood`, model and mapping versions, and `needsManualSelection`. Empty or out-of-vocabulary text has no suggested mood and requires manual selection. Every prediction requires user confirmation. The manual cutoff is selected from dev score bins by a documented rule: at least 70% top-label precision and 20% coverage. The current cutoff is 0.90; on dev, it covered 1,610 of 5,375 examples with 74.6% top-label precision. The test split was inspected during prototype development, so its metrics are descriptive rather than a blind final estimate. These results do not establish performance on personal check-ins.
 
 `POST /v1/mood/confirm` accepts `valence`, `arousal`, and `source` (`manual`, `text-model`, or `user-corrected`), plus optional `confidence`. It returns `startMood` in the Phase 0 session contract shape. The API is stateless and does not retain check-in text. It binds to localhost in the run command; authentication and production deployment are outside this phase.
 
