@@ -44,6 +44,10 @@ func handler(catalog taste.Catalog) http.Handler {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 			return
 		}
+		if err := catalog.ValidateCandidates(response.Candidates); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "candidate audio unavailable"})
+			return
+		}
 		writeJSON(w, http.StatusOK, response)
 	})
 	return mux

@@ -124,6 +124,7 @@ func Rank(c Catalog, request Request) (Response, error) {
 		track, _ := c.Track(event.TrackID)
 		switch event.Type {
 		case "start":
+			seen[event.TrackID] = true
 		case "like":
 			positive[event.TrackID] = math.Min(3, positive[event.TrackID]+2)
 			seen[event.TrackID] = true

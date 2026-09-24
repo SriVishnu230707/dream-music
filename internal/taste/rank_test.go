@@ -1,6 +1,7 @@
 package taste
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -105,6 +106,24 @@ func TestSkipIsWeakAndColdStartDiversifies(t *testing.T) {
 	}
 }
 
+func TestStartMarksTrackSeenWithoutInventingPreference(t *testing.T) {
+	r := request()
+	r.Strategy = "taste-explore"
+	r.Events = []Event{{EventID: "started", TrackID: "a-ambient", Type: "start"}}
+	out, err := Rank(fixtureCatalog(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.ColdStart {
+		t.Fatal("start event invented a taste preference")
+	}
+	for _, candidate := range out.Candidates {
+		if candidate.TrackID == "a-ambient" && candidate.Scores.Novelty != 0 {
+			t.Fatal("started track was marked unseen")
+		}
+	}
+}
+
 func TestPopularityAndExploration(t *testing.T) {
 	c := fixtureCatalog()
 	r := request()
@@ -195,5 +214,76 @@ func TestMalformedAudioRejected(t *testing.T) {
 	}
 	if err := validateWAV(path, 1); err == nil {
 		t.Fatal("malformed WAV accepted")
+	}
+}
+
+func TestSilentAudioRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "silent.wav")
+	wav := testWAV()
+	for i := 44; i < len(wav); i += 2 {
+		binary.LittleEndian.PutUint16(wav[i:i+2], 0)
+	}
+	if err := os.WriteFile(path, wav, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWAV(path, 1); err == nil {
+		t.Fatal("silent WAV accepted")
+	}
+	for i := 44; i < len(wav); i += 2 {
+		binary.LittleEndian.PutUint16(wav[i:i+2], 1)
+	}
+	if err := os.WriteFile(path, wav, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWAV(path, 1); err != nil {
+		t.Fatalf("valid WAV rejected: %v", err)
+	}
+}
+
+func testWAV() []byte {
+	wav := make([]byte, 44+22050*2)
+	copy(wav[:4], "RIFF")
+	binary.LittleEndian.PutUint32(wav[4:8], uint32(len(wav)-8))
+	copy(wav[8:12], "WAVE")
+	copy(wav[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(wav[16:20], 16)
+	binary.LittleEndian.PutUint16(wav[20:22], 1)
+	binary.LittleEndian.PutUint16(wav[22:24], 1)
+	binary.LittleEndian.PutUint32(wav[24:28], 22050)
+	binary.LittleEndian.PutUint32(wav[28:32], 44100)
+	binary.LittleEndian.PutUint16(wav[32:34], 2)
+	binary.LittleEndian.PutUint16(wav[34:36], 16)
+	copy(wav[36:40], "data")
+	binary.LittleEndian.PutUint32(wav[40:44], uint32(len(wav)-44))
+	for i := 44; i < len(wav); i += 2 {
+		binary.LittleEndian.PutUint16(wav[i:i+2], 1)
+	}
+	return wav
+}
+
+func TestRemovedAudioRejectedAfterCatalogLoad(t *testing.T) {
+	c := fixtureCatalog()
+	base := t.TempDir()
+	c.catalogRoot = base
+	c.audioDir = filepath.Join(base, "audio", "generated")
+	if err := os.MkdirAll(c.audioDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	track := c.byID["a-ambient"]
+	track.Audio.DurationSeconds = 1
+	c.byID[track.ID] = track
+	path := filepath.Join(c.audioDir, "a-ambient.wav")
+	if err := os.WriteFile(path, testWAV(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	candidates := []Candidate{{TrackID: "a-ambient"}}
+	if err := c.ValidateCandidates(candidates); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ValidateCandidates(candidates); err == nil {
+		t.Fatal("removed audio still considered playable")
 	}
 }
