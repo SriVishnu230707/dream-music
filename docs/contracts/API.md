@@ -1,6 +1,10 @@
 # Phase 0 API and event contracts
 
-These are version 1 contracts. Phase 2 implements the mood prediction and confirmation endpoints locally; session and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Session and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+
+## `POST /v1/candidates`
+
+Input follows [candidate-request.schema.json](candidate-request.schema.json): `userId`, `strategy` (`popularity`, `taste`, or `taste-explore`), `limit`, and optional stated genres, liked track IDs, exclusions, feedback events, and aggregate popularity counts. The response contains an ordered list of playable candidates with component scores and an explicit feature-availability map. Unknown tracks and conflicting duplicate event IDs are rejected. This local Go endpoint does not persist feedback or generate a mood path; see [Phase 3](../PHASE_3.md).
 
 ## `POST /v1/mood/predict`
 
