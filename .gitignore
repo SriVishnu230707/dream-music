@@ -13,3 +13,7 @@ data/processed/
 data/.processed-*/
 __pycache__/
 *.pyc
+
+# Phase 2 local environment and trained artifacts
+.venv/
+models/

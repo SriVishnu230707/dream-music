@@ -1,10 +1,14 @@
 # Phase 0 API and event contracts
 
-These are version 1 contracts for implementation in later phases. No server is running yet. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+These are version 1 contracts. Phase 2 implements the mood prediction and confirmation endpoints locally; session and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
 
 ## `POST /v1/mood/predict`
 
-Input: `{ "text": "I feel a little low and tired" }`. Output: `{ "label": "sadness", "valence": 0.25, "arousal": 0.2, "confidence": 0.73, "modelVersion": "tfidf-v1" }`. The model version and values here are examples; the endpoint is delivered in Phase 2. Empty or low-confidence input returns a response indicating that manual selection is needed.
+Input: `{ "text": "I feel a little low and tired" }` (maximum 1,000 characters). Output includes `labels` with scores, `suggestedMood` with valence/arousal or `null`, `confidence`, `modelVersion`, `mappingVersion`, `requiresConfirmation`, `needsManualSelection`, and `reason`. Empty or out-of-vocabulary input has no suggestion and requires manual selection. A low top-label score also prompts manual selection. The scores are model outputs, not calibrated certainty about personal mood.
+
+## `POST /v1/mood/confirm`
+
+Input: `{ "valence": 0.25, "arousal": 0.2, "source": "user-corrected" }`. Output: `{ "startMood": { "valence": 0.25, "arousal": 0.2, "source": "user-corrected", "confidence": null }, "confirmed": true }`. Allowed sources are `manual`, `text-model`, and `user-corrected`. This stateless endpoint checks the coordinate range and returns the shape expected by a future session request. It does not create a session or save text.
 
 ## `POST /v1/sessions`
 
