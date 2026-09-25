@@ -21,6 +21,9 @@ func main() {
 	if !strings.HasPrefix(*listen, "127.0.0.1:") && !strings.HasPrefix(*listen, "[::1]:") {
 		log.Fatal("listening app must bind to loopback")
 	}
+	if err := session.ValidateMoodURL(*moodURL); err != nil {
+		log.Fatal(err)
+	}
 	catalog, err := taste.LoadCatalog(*root)
 	if err != nil {
 		log.Fatal(err)
@@ -32,7 +35,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
-	server := &http.Server{Addr: *listen, Handler: session.Server{Catalog: catalog, Store: store, Root: *root, MoodURL: *moodURL}.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
+	server := &http.Server{Addr: *listen, Handler: session.Server{Catalog: catalog, Store: store, MoodURL: *moodURL}.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
 	log.Printf("listening API ready at http://%s", *listen)
 	log.Fatal(server.ListenAndServe())
 }

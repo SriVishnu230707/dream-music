@@ -13,8 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +24,6 @@ import (
 type Server struct {
 	Catalog taste.Catalog
 	Store   Store
-	Root    string
 	MoodURL string
 	Client  *http.Client
 }
@@ -122,6 +120,10 @@ func (s Server) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) get(w http.ResponseWriter, r *http.Request) {
+	if !validSessionID(r.PathValue("id")) {
+		jsonError(w, 404, "session not found")
+		return
+	}
 	record, err := s.Store.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		storeError(w, err)
@@ -131,6 +133,10 @@ func (s Server) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) advance(w http.ResponseWriter, r *http.Request) {
+	if !validSessionID(r.PathValue("id")) {
+		jsonError(w, 404, "session not found")
+		return
+	}
 	var input struct {
 		ExpectedRevision int    `json:"expectedRevision"`
 		Action           string `json:"action"`
@@ -157,28 +163,22 @@ func (s Server) audio(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 404, "track not found")
 		return
 	}
-	if err := s.Catalog.ValidateCandidates([]taste.Candidate{{TrackID: track.ID}}); err != nil {
-		jsonError(w, 503, "audio unavailable")
-		return
-	}
-	path := filepath.Join(s.Root, "data", "catalog", filepath.FromSlash(track.Audio.Path))
-	file, err := os.Open(path)
+	file, stat, err := s.Catalog.OpenAudio(track.ID)
 	if err != nil {
 		jsonError(w, 503, "audio unavailable")
 		return
 	}
 	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		jsonError(w, 503, "audio unavailable")
-		return
-	}
 	w.Header().Set("Content-Type", "audio/wav")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, track.ID+".wav", stat.ModTime(), file)
 }
 
 func (s Server) predict(w http.ResponseWriter, r *http.Request) {
+	if err := ValidateMoodURL(s.MoodURL); err != nil {
+		jsonError(w, 503, "mood service unavailable; choose mood manually")
+		return
+	}
 	var input struct {
 		Text string `json:"text"`
 	}
@@ -203,7 +203,9 @@ func (s Server) predict(w http.ResponseWriter, r *http.Request) {
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Second}
 	}
-	response, err := client.Do(request)
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := noRedirect.Do(request)
 	if err != nil {
 		jsonError(w, 503, "mood service unavailable; choose mood manually")
 		return
@@ -216,6 +218,23 @@ func (s Server) predict(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.Copy(w, io.LimitReader(response.Body, 32*1024))
+}
+
+// ValidateMoodURL keeps raw check-in text on the local host.
+func ValidateMoodURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("mood service URL must be a local HTTP origin")
+	}
+	host, port, err := net.SplitHostPort(parsed.Host)
+	if err != nil || (host != "127.0.0.1" && host != "::1") {
+		return errors.New("mood service must use loopback")
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return errors.New("invalid mood service port")
+	}
+	return nil
 }
 
 func storeError(w http.ResponseWriter, err error) {
@@ -377,4 +396,11 @@ func sessionID() (string, error) {
 		return "", err
 	}
 	return "session-" + hex.EncodeToString(raw), nil
+}
+func validSessionID(id string) bool {
+	if len(id) != 40 || !strings.HasPrefix(id, "session-") {
+		return false
+	}
+	_, err := hex.DecodeString(id[8:])
+	return err == nil
 }

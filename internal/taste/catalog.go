@@ -134,6 +134,48 @@ func validateWAV(path string, duration int) error {
 		return err
 	}
 	defer file.Close()
+	return validateWAVFile(file, duration)
+}
+
+// OpenAudio validates the same file handle that the HTTP server will stream.
+// This avoids validating a path and then opening a different file after a swap.
+func (c Catalog) OpenAudio(id string) (*os.File, os.FileInfo, error) {
+	track, ok := c.Track(id)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown track: %s", id)
+	}
+	path := filepath.Join(c.catalogRoot, filepath.FromSlash(track.Audio.Path))
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if filepath.Dir(resolved) != c.audioDir {
+		return nil, nil, errors.New("audio path changed")
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateWAVFile(file, track.Audio.DurationSeconds); err != nil {
+		file.Close()
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, nil, err
+	}
+	return file, info, nil
+}
+
+func validateWAVFile(file *os.File, duration int) error {
+	if duration < 1 || duration > 60 {
+		return errors.New("invalid WAV duration")
+	}
 	info, err := file.Stat()
 	if err != nil {
 		return err

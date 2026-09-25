@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/SriVishnu230707/dream-music/internal/taste"
@@ -54,7 +56,7 @@ func TestSessionFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &memoryStore{}
-	h := Server{Catalog: catalog, Store: store, Root: "../.."}.Handler()
+	h := Server{Catalog: catalog, Store: store}.Handler()
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 		r.Host = "127.0.0.1:8083"
@@ -107,7 +109,7 @@ func TestRejectedRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := Server{Catalog: catalog, Store: &memoryStore{}, Root: "../.."}.Handler()
+	h := Server{Catalog: catalog, Store: &memoryStore{}}.Handler()
 	request := `{"userId":"u","startMood":{"valence":0.2,"arousal":0.2,"source":"manual"},"targetMood":{"valence":0.8,"arousal":0.8},"trackCount":1,"taste":{"preferredGenres":[],"likedTrackIds":[]}}`
 	cases := []struct {
 		method, path, body, host, origin string
@@ -119,6 +121,7 @@ func TestRejectedRequests(t *testing.T) {
 		{"POST", "/api/v1/sessions", `{"userId":"u","UserId":"overridden"}`, "127.0.0.1:8083", "", 400},
 		{"GET", "/audio/unknown", "", "127.0.0.1:8083", "", 404},
 		{"GET", "/api/v1/sessions/missing", "", "127.0.0.1:8083", "", 404},
+		{"GET", "/api/v1/sessions/" + strings.Repeat("a", 400), "", "127.0.0.1:8083", "", 404},
 	}
 	for _, tc := range cases {
 		r := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
@@ -139,5 +142,33 @@ func TestRejectedRequests(t *testing.T) {
 func TestStoreSentinels(t *testing.T) {
 	if !errors.Is(ErrConflict, ErrConflict) || !errors.Is(ErrNotFound, ErrNotFound) {
 		t.Fatal("sentinels")
+	}
+}
+
+func TestMoodProxyRejectsRedirectAndRemoteURL(t *testing.T) {
+	for _, raw := range []string{"https://127.0.0.1:8000", "http://example.com:8000", "http://127.0.0.1:8000/extra", "http://127.0.0.1:0"} {
+		if ValidateMoodURL(raw) == nil {
+			t.Fatalf("unsafe URL accepted: %s", raw)
+		}
+	}
+	redirected := false
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { redirected = true }))
+	defer other.Close()
+	mood := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusTemporaryRedirect)
+	}))
+	defer mood.Close()
+	catalog, err := taste.LoadCatalog("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Server{Catalog: catalog, Store: &memoryStore{}, MoodURL: mood.URL}.Handler()
+	r := httptest.NewRequest("POST", "/api/v1/mood/predict", strings.NewReader(`{"text":"private check-in"}`))
+	r.Host = "127.0.0.1:8083"
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 503 || redirected {
+		t.Fatalf("redirect followed: status %d, redirected %v", w.Code, redirected)
 	}
 }
