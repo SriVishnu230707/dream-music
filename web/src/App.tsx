@@ -397,10 +397,14 @@ export default function App() {
     }
   }
   async function replay() {
-    if (!audio.current || !(await sendEvent("replay"))) return;
+    if (!audio.current || busy) return;
     audio.current.currentTime = 0;
     try {
       await audio.current.play();
+      if (!(await sendEvent("replay"))) {
+        audio.current.pause();
+        return;
+      }
       setPlaying(true);
     } catch {
       setMessage("Playback could not restart.");

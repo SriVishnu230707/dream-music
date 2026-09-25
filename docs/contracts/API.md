@@ -26,7 +26,7 @@ Each queue item includes `position`, `trackId`, `pathPoint`, `score`, and `reaso
 
 ## `POST /v1/sessions/{sessionId}/events`
 
-The implemented route is `POST /api/v1/sessions/{sessionId}/events`. Input conforms to [feedback-event.schema.json](feedback-event.schema.json), including `expectedRevision`. `eventId` is an idempotency key unique within the session. Retries with the same ID and same payload return the original result; reuse with a different payload returns `409`. `start`, `skip`, `complete`, `replay`, and `like` are audited. Feedback can rerank future tracks; the current and played tracks remain fixed. The response includes `accepted`, `revision`, `queueChanged`, `futureReplanned`, and the updated `session`. `GET` on the same route returns the audit events.
+The implemented route is `POST /api/v1/sessions/{sessionId}/events`. Input conforms to [feedback-event.schema.json](feedback-event.schema.json), including `expectedRevision`. `eventId` is an idempotency key unique within the session. Retries with the same ID and same payload return the original event outcome with the current session state; reuse with a different payload returns `409`. `start`, `skip`, `complete`, `replay`, and `like` are audited. Feedback can rerank future tracks; the current and played tracks remain fixed. The response includes `accepted`, `revision`, `queueChanged`, `futureReplanned`, and the updated `session`. `GET` on the same route returns the audit events.
 
 ## `POST /v1/sessions/{sessionId}/check-ins`
 

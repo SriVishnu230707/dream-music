@@ -54,6 +54,8 @@ func (m *memoryStore) ApplyEvent(_ context.Context, c taste.Catalog, input Event
 				if !reflect.DeepEqual(entry.EventInput, input) {
 					return EventResult{}, ErrConflict
 				}
+				old.Session = r
+				old.Revision = r.Revision
 				return old, nil
 			}
 		}
@@ -327,6 +329,9 @@ func TestPhase6EventAndPrivacyEndpoints(t *testing.T) {
 	}
 	if got := call("GET", path+"/check-ins", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"checkIns":[]`) {
 		t.Fatal("check-in audit not deleted")
+	}
+	if got := call("POST", path+"/events", event); got.Code != 200 || strings.Contains(got.Body.String(), `"lastCheckIn"`) {
+		t.Fatal("event retry disclosed a deleted check-in")
 	}
 	if got := call("DELETE", path, ""); got.Code != 204 {
 		t.Fatalf("delete: %d", got.Code)

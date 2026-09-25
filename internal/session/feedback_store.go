@@ -38,6 +38,9 @@ func (s *Postgres) ApplyEvent(ctx context.Context, c taste.Catalog, input EventI
 		if err := json.Unmarshal(saved, &result); err != nil {
 			return EventResult{}, err
 		}
+		// A retry must never disclose a check-in that has since been deleted.
+		result.Session = r
+		result.Revision = r.Revision
 		return result, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -63,7 +66,9 @@ func (s *Postgres) ApplyEvent(ctx context.Context, c taste.Catalog, input EventI
 		return EventResult{}, err
 	}
 	result.Session = updated
-	output, err := json.Marshal(result)
+	storedResult := result
+	storedResult.Session = Record{}
+	output, err := json.Marshal(storedResult)
 	if err != nil {
 		return EventResult{}, err
 	}
@@ -222,6 +227,10 @@ func (s *Postgres) ClearCheckIns(ctx context.Context, c taste.Catalog, id string
 		return Record{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM session_check_ins WHERE session_id=$1`, id); err != nil {
+		return Record{}, err
+	}
+	// Remove historical full-session snapshots saved by older builds.
+	if _, err = tx.ExecContext(ctx, `UPDATE session_events SET result=result-'session' WHERE session_id=$1`, id); err != nil {
 		return Record{}, err
 	}
 	err = tx.QueryRowContext(ctx, `UPDATE listening_sessions SET queue=$2,last_check_in=NULL,revision=$3,updated_at=now() WHERE id=$1 RETURNING updated_at`, id, queue, updated.Revision).Scan(&updated.UpdatedAt)
