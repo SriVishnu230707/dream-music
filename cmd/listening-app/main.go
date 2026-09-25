@@ -35,6 +35,18 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	// PostgreSQL cascades remove each expired session's feedback and check-ins.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := store.PurgeExpired(ctx); err != nil {
+				log.Printf("expired-session purge: %v", err)
+			}
+			cancel()
+		}
+	}()
 	server := &http.Server{Addr: *listen, Handler: session.Server{Catalog: catalog, Store: store, MoodURL: *moodURL}.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
 	log.Printf("listening API ready at http://%s", *listen)
 	log.Fatal(server.ListenAndServe())

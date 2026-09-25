@@ -25,6 +25,25 @@ type Session = {
   currentIndex: number;
   status: "ready" | "active" | "completed";
   revision: number;
+  retentionDays: number;
+  expiresAt: string;
+  lastCheckIn?: Mood;
+};
+type PlaybackEvent = "start" | "skip" | "complete" | "replay" | "like";
+type AuditEvent = {
+  eventId: string;
+  trackId: string;
+  type: PlaybackEvent;
+  occurredAt: string;
+  acceptedAt: string;
+};
+type AuditCheckIn = { id: string; mood: Mood; createdAt: string };
+type EventResult = {
+  accepted: boolean;
+  revision: number;
+  queueChanged: boolean;
+  futureReplanned: boolean;
+  session: Session;
 };
 type Track = {
   id: string;
@@ -54,6 +73,7 @@ async function api<T>(
     cache: "no-store",
   });
   const raw = await response.text();
+  if (response.status === 204) return undefined as T;
   let data: Record<string, unknown>;
   try {
     data = JSON.parse(raw);
@@ -148,6 +168,16 @@ export default function App() {
   });
   const [target, setTarget] = useState<Mood>({ valence: 0.7, arousal: 0.5 });
   const [count, setCount] = useState(5);
+  const [retentionDays, setRetentionDays] = useState(7);
+  const [sessionMood, setSessionMood] = useState<Mood>({
+    valence: 0.5,
+    arousal: 0.5,
+    source: "manual",
+  });
+  const [likedTrackIDs, setLikedTrackIDs] = useState<string[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditCheckIns, setAuditCheckIns] = useState<AuditCheckIn[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [moodConfirmed, setMoodConfirmed] = useState(true);
   const [message, setMessage] = useState("");
@@ -156,6 +186,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const audio = useRef<HTMLAudioElement>(null);
   const advancing = useRef(false);
+  const startedTrack = useRef<string | null>(null);
 
   useEffect(() => {
     api<{ tracks: Track[] }>("/api/v1/catalog")
@@ -171,7 +202,17 @@ export default function App() {
     }
     if (id)
       api<Session>(`/api/v1/sessions/${encodeURIComponent(id)}`)
-        .then(setSession)
+        .then((data) => {
+          setSession(data);
+          setSessionMood(
+            data.lastCheckIn || {
+              valence: data.queue[data.currentIndex]?.trackMood.valence ?? 0.5,
+              arousal: data.queue[data.currentIndex]?.trackMood.arousal ?? 0.5,
+              source: "manual",
+            },
+          );
+          void loadHistory(id);
+        })
         .catch(() => {
           try {
             localStorage.removeItem("mood-drift-session");
@@ -182,6 +223,25 @@ export default function App() {
 
   const current = session?.queue[session.currentIndex];
   const currentTrack = current && tracks[current.trackId];
+  async function loadHistory(id: string) {
+    try {
+      const [events, checkIns] = await Promise.all([
+        api<{ events: AuditEvent[] }>(
+          `/api/v1/sessions/${encodeURIComponent(id)}/events`,
+        ),
+        api<{ checkIns: AuditCheckIn[] }>(
+          `/api/v1/sessions/${encodeURIComponent(id)}/check-ins`,
+        ),
+      ]);
+      setAuditEvents(events.events);
+      setAuditCheckIns(checkIns.checkIns);
+      setLikedTrackIDs(
+        events.events.filter((e) => e.type === "like").map((e) => e.trackId),
+      );
+    } catch {
+      /* Session remains usable if history cannot load. */
+    }
+  }
   async function suggest() {
     if (!checkIn.trim()) {
       setMessage("Write a check-in or set your mood manually.");
@@ -218,9 +278,19 @@ export default function App() {
         startMood: start,
         targetMood: { valence: target.valence, arousal: target.arousal },
         trackCount: count,
+        retentionDays,
         taste: { preferredGenres: [], likedTrackIds: [] },
       });
       setSession(data);
+      setSessionMood({
+        valence: data.queue[0]?.trackMood.valence ?? start.valence,
+        arousal: data.queue[0]?.trackMood.arousal ?? start.arousal,
+        source: "manual",
+      });
+      setAuditEvents([]);
+      setAuditCheckIns([]);
+      setLikedTrackIDs([]);
+      startedTrack.current = null;
       try {
         localStorage.setItem("mood-drift-session", data.sessionId);
       } catch {}
@@ -232,20 +302,58 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function advance(action: "skip" | "complete") {
-    if (!session || advancing.current) return;
+  async function sendEvent(type: PlaybackEvent) {
+    if (!session || !current || advancing.current) return null;
     advancing.current = true;
     setBusy(true);
-    audio.current?.pause();
-    setPlaying(false);
+    const moving = type === "skip" || type === "complete";
+    if (moving) {
+      audio.current?.pause();
+      setPlaying(false);
+    }
+    const payload = {
+      eventId: crypto.randomUUID(),
+      sessionId: session.sessionId,
+      trackId: current.trackId,
+      type,
+      occurredAt: new Date().toISOString(),
+      expectedRevision: session.revision,
+      ...(type === "start" ? {} : { listenedSeconds: Math.max(0, progress) }),
+    };
     try {
-      const data = await api<Session>(
-        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/advance`,
+      const result = await api<EventResult>(
+        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/events`,
         "POST",
-        { expectedRevision: session.revision, action },
+        payload,
       );
-      setSession(data);
-      setProgress(0);
+      setSession(result.session);
+      if (moving) {
+        setProgress(0);
+        startedTrack.current = null;
+        const next = result.session.queue[result.session.currentIndex];
+        if (next)
+          setSessionMood({
+            valence: next.trackMood.valence,
+            arousal: next.trackMood.arousal,
+            source: "manual",
+          });
+      }
+      if (type === "start") startedTrack.current = current.trackId;
+      if (type === "like")
+        setLikedTrackIDs((ids) => [...new Set([...ids, current.trackId])]);
+      setAuditEvents((events) => [
+        ...events,
+        {
+          eventId: payload.eventId,
+          trackId: payload.trackId,
+          type,
+          occurredAt: payload.occurredAt,
+          acceptedAt: new Date().toISOString(),
+        },
+      ]);
+      if (result.queueChanged)
+        setMessage("Upcoming tracks were adjusted using your feedback.");
+      return result;
     } catch (e) {
       setMessage((e as Error).message);
       try {
@@ -254,14 +362,19 @@ export default function App() {
             `/api/v1/sessions/${encodeURIComponent(session.sessionId)}`,
           ),
         );
-      } catch {}
+      } catch {
+        setMessage(
+          "Could not reconnect to this session. Refresh the page to retry.",
+        );
+      }
+      return null;
     } finally {
       advancing.current = false;
       setBusy(false);
     }
   }
   async function toggle() {
-    if (!audio.current) return;
+    if (!audio.current || busy) return;
     if (playing) {
       audio.current.pause();
       setPlaying(false);
@@ -269,12 +382,106 @@ export default function App() {
     }
     try {
       await audio.current.play();
+      if (current && startedTrack.current !== current.trackId) {
+        if (!(await sendEvent("start"))) {
+          audio.current.pause();
+          return;
+        }
+      }
       setPlaying(true);
       setMessage("");
     } catch {
       setMessage(
         "Playback was blocked or audio is unavailable. Press Play again or skip this track.",
       );
+    }
+  }
+  async function replay() {
+    if (!audio.current || !(await sendEvent("replay"))) return;
+    audio.current.currentTime = 0;
+    try {
+      await audio.current.play();
+      setPlaying(true);
+    } catch {
+      setMessage("Playback could not restart.");
+    }
+  }
+  async function submitCheckIn() {
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      const updated = await api<Session>(
+        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/check-ins`,
+        "POST",
+        {
+          expectedRevision: session.revision,
+          valence: sessionMood.valence,
+          arousal: sessionMood.arousal,
+          source: "manual",
+        },
+      );
+      setSession(updated);
+      setAuditCheckIns((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          mood: { ...sessionMood, source: "manual" },
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      setMessage("Your check-in adjusted upcoming tracks.");
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeCheckIns() {
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      const updated = await api<Session>(
+        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/check-ins`,
+        "DELETE",
+        { expectedRevision: session.revision },
+      );
+      setSession(updated);
+      setAuditCheckIns([]);
+      setMessage("Saved check-ins were removed.");
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteSession() {
+    if (
+      !session ||
+      busy ||
+      !window.confirm(
+        "Delete this session, its feedback, and check-ins permanently?",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await api<void>(
+        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}`,
+        "DELETE",
+      );
+      audio.current?.pause();
+      try {
+        localStorage.removeItem("mood-drift-session");
+      } catch {}
+      setSession(null);
+      setPlaying(false);
+      setAuditEvents([]);
+      setAuditCheckIns([]);
+      setMessage("Session and its saved data were deleted.");
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
   function moodControl(
@@ -418,6 +625,17 @@ export default function App() {
                 onChange={(e) => setCount(Number(e.target.value))}
               />
             </label>
+            <label>
+              Keep this session for
+              <select
+                value={retentionDays}
+                onChange={(e) => setRetentionDays(Number(e.target.value))}
+              >
+                <option value={1}>1 day</option>
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+              </select>
+            </label>
             <button
               type="button"
               className="primary-action"
@@ -500,7 +718,7 @@ export default function App() {
                 key={current.trackId}
                 src={currentTrack?.audioUrl || `/audio/${current.trackId}`}
                 preload="metadata"
-                onEnded={() => void advance("complete")}
+                onEnded={() => void sendEvent("complete")}
                 onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime)}
                 onError={() => {
                   setPlaying(false);
@@ -515,10 +733,27 @@ export default function App() {
                 </button>
                 <button
                   className="secondary"
-                  onClick={() => void advance("skip")}
+                  onClick={() => void sendEvent("skip")}
                   disabled={busy}
                 >
                   Skip
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void replay()}
+                  disabled={busy}
+                >
+                  Replay
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void sendEvent("like")}
+                  disabled={busy || likedTrackIDs.includes(current.trackId)}
+                  aria-pressed={likedTrackIDs.includes(current.trackId)}
+                >
+                  {likedTrackIDs.includes(current.trackId)
+                    ? "Liked ♥"
+                    : "Like ♡"}
                 </button>
                 <span aria-live="polite">
                   {Math.floor(progress)}s /{" "}
@@ -553,6 +788,90 @@ export default function App() {
               </li>
             ))}
           </ol>
+          {session.status !== "completed" && (
+            <div className="feedback-panel">
+              <h3>Check in again</h3>
+              <p>Only tracks after the current one will change.</p>
+              {moodControl("Your mood now", sessionMood, setSessionMood)}
+              <button
+                type="button"
+                onClick={() => void submitCheckIn()}
+                disabled={busy}
+              >
+                Update upcoming tracks
+              </button>
+            </div>
+          )}
+          <div className="privacy-panel">
+            <h3>Your session data</h3>
+            <p>
+              Stored until{" "}
+              {session.expiresAt
+                ? new Date(session.expiresAt).toLocaleDateString()
+                : `${session.retentionDays || 30} days from creation`}
+              . Raw check-in text is never stored.
+            </p>
+            <div className="privacy-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setShowHistory((v) => !v);
+                  if (!showHistory) void loadHistory(session.sessionId);
+                }}
+              >
+                {showHistory ? "Hide history" : "View feedback history"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void removeCheckIns()}
+                disabled={busy || (!session.lastCheckIn && auditCheckIns.length === 0)}
+              >
+                Delete saved check-ins
+              </button>
+              <button
+                type="button"
+                className="danger-action"
+                onClick={() => void deleteSession()}
+                disabled={busy}
+              >
+                Delete session and data
+              </button>
+            </div>
+            {showHistory && (
+              <div className="history-list">
+                <strong>Playback events</strong>
+                {auditEvents.length === 0 ? (
+                  <p>No events yet.</p>
+                ) : (
+                  <ul>
+                    {auditEvents.map((item) => (
+                      <li key={item.eventId}>
+                        {item.type} ·{" "}
+                        {tracks[item.trackId]?.title || item.trackId} ·{" "}
+                        {new Date(item.acceptedAt).toLocaleString()}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <strong>Explicit check-ins</strong>
+                {auditCheckIns.length === 0 ? (
+                  <p>No saved check-ins.</p>
+                ) : (
+                  <ul>
+                    {auditCheckIns.map((item) => (
+                      <li key={item.id}>
+                        {Math.round(item.mood.valence * 100)}% valence ·{" "}
+                        {Math.round(item.mood.arousal * 100)}% energy ·{" "}
+                        {new Date(item.createdAt).toLocaleString()}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
           <button
             className="text"
             onClick={() => {

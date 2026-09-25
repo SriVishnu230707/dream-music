@@ -1,6 +1,6 @@
 # Phase 0 API and event contracts
 
-These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Phase 5 implements persisted local session creation, retrieval, and playback advancement; feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Phase 6 implements persisted local sessions and feedback. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
 
 ## `POST /v1/candidates`
 
@@ -16,21 +16,21 @@ Input: `{ "valence": 0.25, "arousal": 0.2, "source": "user-corrected" }`. Output
 
 ## `POST /v1/sessions`
 
-Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null`. Do not persist raw text by default. `trackCount` is between 1 and 20. The Phase 5 listening API at `/api/v1/sessions` persists the generated queue and returns `sessionId`, `status`, `catalogId`, `revision`, `currentIndex`, and ordered `queue`. The Phase 4 planning API remains available separately at `/v1/sessions` on its own local port.
+Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null` and is not persisted. `trackCount` is between 1 and 20. Optional `retentionDays` is 1, 7, or 30 (default 30). The listening API at `/api/v1/sessions` persists the generated queue and returns `sessionId`, `status`, `catalogId`, `revision`, `currentIndex`, ordered `queue`, and `expiresAt`. The Phase 4 planning API remains available separately at `/v1/sessions` on its own local port.
 
 Each queue item includes `position`, `trackId`, `pathPoint`, `score`, and `reason`. `pathPoint` is the requested valence–arousal point for that slot, not a claim about the listener's actual mood. For `trackCount = 1`, it equals `startMood`.
 
 ## `GET /v1/sessions/{sessionId}`
 
-The Phase 5 route `/api/v1/sessions/{sessionId}` returns the persisted current position and queue. `POST /api/v1/sessions/{sessionId}/advance` accepts an expected revision and `skip` or `complete`, moving one track forward atomically. Future Phase 6 re-ranking will increment revisions without moving played items.
+`/api/v1/sessions/{sessionId}` returns the persisted current position and queue. The legacy `POST /api/v1/sessions/{sessionId}/advance` accepts an expected revision and `skip` or `complete`; it creates an audited event and moves one track forward atomically.
 
 ## `POST /v1/sessions/{sessionId}/events`
 
-Input conforms to [feedback-event.schema.json](feedback-event.schema.json). `eventId` is an idempotency key unique within the session. Retries with the same ID and same payload return the existing result; reuse with a different payload is rejected. The response contains `accepted`, `sessionId`, and the current `revision`.
+The implemented route is `POST /api/v1/sessions/{sessionId}/events`. Input conforms to [feedback-event.schema.json](feedback-event.schema.json), including `expectedRevision`. `eventId` is an idempotency key unique within the session. Retries with the same ID and same payload return the original result; reuse with a different payload returns `409`. `start`, `skip`, `complete`, `replay`, and `like` are audited. Feedback can rerank future tracks; the current and played tracks remain fixed. The response includes `accepted`, `revision`, `queueChanged`, `futureReplanned`, and the updated `session`. `GET` on the same route returns the audit events.
 
 ## `POST /v1/sessions/{sessionId}/check-ins`
 
-Input: `{ "valence": 0.4, "arousal": 0.3, "source": "manual" }`. This explicit check-in can update the path for future songs only. It is stored separately from implicit playback events and follows the user's retention choice.
+The implemented route is `POST /api/v1/sessions/{sessionId}/check-ins`. Input: `{ "expectedRevision": 2, "valence": 0.4, "arousal": 0.3, "source": "manual" }`. An explicit check-in updates the path for future songs only. `GET` returns saved check-ins; `DELETE` with `{ "expectedRevision": 3 }` removes them and replans future tracks without the last check-in. `DELETE /api/v1/sessions/{sessionId}` removes the session and its events/check-ins. Expired sessions are purged hourly while the server runs and on startup.
 
 ## Error rules
 

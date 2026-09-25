@@ -4,13 +4,14 @@
   "title": "Session feedback event v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["eventId", "sessionId", "trackId", "type", "occurredAt"],
+  "required": ["eventId", "sessionId", "trackId", "type", "occurredAt", "expectedRevision"],
   "properties": {
-    "eventId": {"type": "string", "minLength": 1},
+    "eventId": {"type": "string", "minLength": 1, "maxLength": 128},
     "sessionId": {"type": "string", "minLength": 1},
     "trackId": {"type": "string", "minLength": 1},
     "type": {"type": "string", "enum": ["start", "skip", "complete", "replay", "like"]},
     "occurredAt": {"type": "string", "format": "date-time"},
-    "listenedSeconds": {"type": "number", "minimum": 0}
+    "listenedSeconds": {"type": "number", "minimum": 0},
+    "expectedRevision": {"type": "integer", "minimum": 1}
   }
 }

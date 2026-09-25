@@ -31,12 +31,16 @@ type TasteInput struct {
 }
 
 type Request struct {
-	UserID      string     `json:"userId"`
-	CheckInText *string    `json:"checkInText,omitempty"`
-	StartMood   StartMood  `json:"startMood"`
-	TargetMood  Mood       `json:"targetMood"`
-	TrackCount  int        `json:"trackCount"`
-	Taste       TasteInput `json:"taste"`
+	UserID        string     `json:"userId"`
+	CheckInText   *string    `json:"checkInText,omitempty"`
+	StartMood     StartMood  `json:"startMood"`
+	TargetMood    Mood       `json:"targetMood"`
+	TrackCount    int        `json:"trackCount"`
+	Taste         TasteInput `json:"taste"`
+	RetentionDays int        `json:"retentionDays,omitempty"`
+	// Internal session adaptation inputs. They are never accepted from session JSON.
+	ExcludeTrackIDs []string      `json:"-"`
+	FeedbackEvents  []taste.Event `json:"-"`
 }
 
 type QueueItem struct {
@@ -93,7 +97,8 @@ func Build(c taste.Catalog, req Request) (Plan, error) {
 		return Plan{}, err
 	}
 	pool, err := taste.Rank(c, taste.Request{UserID: req.UserID, Strategy: "taste",
-		Limit: min(20, c.Count()), PreferredGenres: req.Taste.PreferredGenres, LikedTrackIDs: req.Taste.LikedTrackIDs})
+		Limit: min(20, c.Count()), PreferredGenres: req.Taste.PreferredGenres, LikedTrackIDs: req.Taste.LikedTrackIDs,
+		ExcludeTrackIDs: req.ExcludeTrackIDs, Events: req.FeedbackEvents})
 	if err != nil {
 		return Plan{}, err
 	}

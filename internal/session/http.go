@@ -38,6 +38,12 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions", s.create)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", s.get)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/advance", s.advance)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/events", s.event)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/events", s.events)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/check-ins", s.checkIn)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/check-ins", s.checkIns)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}/check-ins", s.clearCheckIns)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.deleteSession)
 	mux.HandleFunc("GET /audio/{id}", s.audio)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
@@ -88,6 +94,13 @@ func (s Server) create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "taste arrays required")
 		return
 	}
+	if req.RetentionDays == 0 {
+		req.RetentionDays = 30
+	}
+	if req.RetentionDays != 1 && req.RetentionDays != 7 && req.RetentionDays != 30 {
+		jsonError(w, 400, "retentionDays must be 1, 7, or 30")
+		return
+	}
 	plan, err := sequence.Build(s.Catalog, req)
 	if err != nil {
 		var insufficient sequence.InsufficientError
@@ -111,7 +124,7 @@ func (s Server) create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 500, "session ID unavailable")
 		return
 	}
-	record, err := s.Store.Create(r.Context(), Record{ID: id, UserID: req.UserID, CatalogID: plan.CatalogID, Queue: plan.Queue})
+	record, err := s.Store.Create(r.Context(), Record{ID: id, UserID: req.UserID, CatalogID: plan.CatalogID, Queue: plan.Queue, TargetMood: &req.TargetMood, Taste: req.Taste, RetentionDays: req.RetentionDays})
 	if err != nil {
 		jsonError(w, 503, "session storage unavailable")
 		return
@@ -149,12 +162,130 @@ func (s Server) advance(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "invalid advance request")
 		return
 	}
-	record, err := s.Store.Advance(r.Context(), r.PathValue("id"), input.ExpectedRevision, input.Action)
+	record, err := s.Store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	if input.ExpectedRevision != record.Revision || record.Status == "completed" || record.CurrentIndex >= len(record.Queue) {
+		storeError(w, ErrConflict)
+		return
+	}
+	eventID, err := sessionID()
+	if err != nil {
+		jsonError(w, 500, "event ID unavailable")
+		return
+	}
+	result, err := s.Store.ApplyEvent(r.Context(), s.Catalog, EventInput{EventID: "event-" + eventID[8:], SessionID: record.ID, TrackID: record.Queue[record.CurrentIndex].TrackID, Type: input.Action, OccurredAt: time.Now().UTC(), ExpectedRevision: input.ExpectedRevision})
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	jsonResponse(w, 200, result.Session)
+}
+
+func (s Server) event(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	var input EventInput
+	if err := decode(r, w, &input, 4096, "event"); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	if input.SessionID != id {
+		jsonError(w, 400, "sessionId does not match URL")
+		return
+	}
+	result, err := s.Store.ApplyEvent(r.Context(), s.Catalog, input)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	jsonResponse(w, 200, result)
+}
+func (s Server) events(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	items, err := s.Store.ListEvents(r.Context(), id)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"sessionId": id, "events": items})
+}
+func (s Server) checkIn(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	var input CheckInInput
+	if err := decode(r, w, &input, 1024, "check-in"); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	record, err := s.Store.AddCheckIn(r.Context(), s.Catalog, id, input)
 	if err != nil {
 		storeError(w, err)
 		return
 	}
 	jsonResponse(w, 200, record)
+}
+func (s Server) checkIns(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	items, err := s.Store.ListCheckIns(r.Context(), id)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"sessionId": id, "checkIns": items})
+}
+func (s Server) clearCheckIns(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	var input struct {
+		ExpectedRevision int `json:"expectedRevision"`
+	}
+	if err := decode(r, w, &input, 1024, "clear-check-ins"); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	if input.ExpectedRevision < 1 {
+		jsonError(w, 400, "invalid expectedRevision")
+		return
+	}
+	record, err := s.Store.ClearCheckIns(r.Context(), s.Catalog, id, input.ExpectedRevision)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	jsonResponse(w, 200, record)
+}
+func (s Server) deleteSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validSessionID(id) {
+		jsonError(w, 404, "session not found")
+		return
+	}
+	if err := s.Store.DeleteSession(r.Context(), id); err != nil {
+		storeError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s Server) audio(w http.ResponseWriter, r *http.Request) {
@@ -242,6 +373,8 @@ func storeError(w http.ResponseWriter, err error) {
 		jsonError(w, 404, "session not found")
 	} else if errors.Is(err, ErrConflict) {
 		jsonError(w, 409, "session changed; reload it")
+	} else if errors.Is(err, ErrInvalid) {
+		jsonError(w, 400, err.Error())
 	} else {
 		jsonError(w, 503, "session storage unavailable")
 	}
@@ -290,13 +423,22 @@ func validateShape(raw []byte, shape string) error {
 	var allowed, required []string
 	switch shape {
 	case "session":
-		allowed = []string{"userId", "checkInText", "startMood", "targetMood", "trackCount", "taste"}
+		allowed = []string{"userId", "checkInText", "startMood", "targetMood", "trackCount", "taste", "retentionDays"}
 		required = []string{"userId", "startMood", "targetMood", "trackCount", "taste"}
 	case "advance":
 		allowed = []string{"expectedRevision", "action"}
 		required = allowed
 	case "predict":
 		allowed = []string{"text"}
+		required = allowed
+	case "event":
+		allowed = []string{"eventId", "sessionId", "trackId", "type", "occurredAt", "listenedSeconds", "expectedRevision"}
+		required = []string{"eventId", "sessionId", "trackId", "type", "occurredAt", "expectedRevision"}
+	case "check-in":
+		allowed = []string{"expectedRevision", "valence", "arousal", "source"}
+		required = allowed
+	case "clear-check-ins":
+		allowed = []string{"expectedRevision"}
 		required = allowed
 	default:
 		return errors.New("unknown request shape")
