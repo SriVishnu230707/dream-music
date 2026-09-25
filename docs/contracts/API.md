@@ -1,6 +1,6 @@
 # Phase 0 API and event contracts
 
-These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Phase 4 implements local session queue creation; retrieval and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Phase 5 implements persisted local session creation, retrieval, and playback advancement; feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
 
 ## `POST /v1/candidates`
 
@@ -16,13 +16,13 @@ Input: `{ "valence": 0.25, "arousal": 0.2, "source": "user-corrected" }`. Output
 
 ## `POST /v1/sessions`
 
-Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null`. Do not persist raw text by default. `trackCount` is between 1 and 20. The Phase 4 local endpoint returns a generated `sessionId`, `status`, `catalogId`, `revision`, ordered `queue`, component scores, and quality metrics. The ID is ephemeral: sessions are not yet persisted or retrievable.
+Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null`. Do not persist raw text by default. `trackCount` is between 1 and 20. The Phase 5 listening API at `/api/v1/sessions` persists the generated queue and returns `sessionId`, `status`, `catalogId`, `revision`, `currentIndex`, and ordered `queue`. The Phase 4 planning API remains available separately at `/v1/sessions` on its own local port.
 
 Each queue item includes `position`, `trackId`, `pathPoint`, `score`, and `reason`. `pathPoint` is the requested valence–arousal point for that slot, not a claim about the listener's actual mood. For `trackCount = 1`, it equals `startMood`.
 
 ## `GET /v1/sessions/{sessionId}`
 
-Returns the current session and queue. The `revision` increments whenever future slots are re-ranked. The currently playing item and completed items do not move.
+The Phase 5 route `/api/v1/sessions/{sessionId}` returns the persisted current position and queue. `POST /api/v1/sessions/{sessionId}/advance` accepts an expected revision and `skip` or `complete`, moving one track forward atomically. Future Phase 6 re-ranking will increment revisions without moving played items.
 
 ## `POST /v1/sessions/{sessionId}/events`
 

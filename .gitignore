@@ -17,3 +17,7 @@ __pycache__/
 # Phase 2 local environment and trained artifacts
 .venv/
 models/
+
+# Phase 5 frontend build
+web/dist/
+web/tsconfig.tsbuildinfo

@@ -1,6 +1,6 @@
 # Mood Drift Music — phased implementation plan
 
-**Status:** Phases 0–4 implemented locally; Phase 5 is next. This file is the execution plan. The README remains the project overview.
+**Status:** Phases 0–5 implemented locally; Phase 6 is next. This file is the execution plan. The README remains the project overview.
 
 ## Product target
 
@@ -159,4 +159,4 @@ Use a Go monolith for application logic and one Python service for model inferen
 
 The dependency path is **catalog/permissions → schemas → reproducible data → classifier and taste baselines → sequencer → player → adaptation → comparative evaluation**. Work on the UI shell can proceed once Phase 0 contracts are fixed, but do not make provider integration the critical path.
 
-The next implementation task is **Phase 0, steps 1–4**: choose a small permitted audio set, record provenance and attribution, define track/session/event schemas, and create one complete example session. Those artifacts will make the following phases concrete and testable.
+The next implementation task is **Phase 6**: persist idempotent playback events, use explicit check-ins to adjust only unplayed tracks, and add retention and deletion controls.
