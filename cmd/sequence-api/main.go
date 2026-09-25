@@ -10,7 +10,9 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -40,6 +42,10 @@ func handler(catalog taste.Catalog) http.Handler {
 		}
 		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, "trailing JSON or oversized request")
+			return
+		}
+		if err := rejectDuplicateKeys(raw); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := requiredFields(raw); err != nil {
@@ -83,13 +89,30 @@ func handler(catalog taste.Catalog) http.Handler {
 			"unsupportedGenres": plan.UnsupportedGenres, "queue": plan.Queue, "quality": plan.Quality,
 		})
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil || (host != "127.0.0.1" && host != "::1") {
+			writeError(w, http.StatusForbidden, "local host required")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Scheme != "http" || parsed.Host != r.Host || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+				writeError(w, http.StatusForbidden, "cross-origin request rejected")
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func requiredFields(raw json.RawMessage) error {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &root); err != nil || root == nil {
 		return errors.New("session request must be an object")
+	}
+	if err := exactKeys(root, "session request", "userId", "checkInText", "startMood", "targetMood", "trackCount", "taste"); err != nil {
+		return err
 	}
 	for _, key := range []string{"userId", "startMood", "targetMood", "trackCount", "taste"} {
 		if missing(root[key]) {
@@ -108,13 +131,87 @@ func requiredFields(raw json.RawMessage) error {
 		if err := json.Unmarshal(root[entry.name], &nested); err != nil || nested == nil {
 			return fmt.Errorf("%s must be an object", entry.name)
 		}
+		allowed := entry.keys
+		if entry.name == "startMood" {
+			allowed = append(append([]string(nil), allowed...), "confidence")
+		}
+		if err := exactKeys(nested, entry.name, allowed...); err != nil {
+			return err
+		}
 		for _, key := range entry.keys {
 			if missing(nested[key]) {
 				return fmt.Errorf("missing required field: %s.%s", entry.name, key)
 			}
 		}
 	}
+	for _, key := range []string{"preferredGenres", "likedTrackIds"} {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(root["taste"], &fields)
+		var values []json.RawMessage
+		if string(fields[key]) == "null" || json.Unmarshal(fields[key], &values) != nil {
+			return fmt.Errorf("taste.%s must be an array", key)
+		}
+	}
 	return nil
+}
+
+func exactKeys(fields map[string]json.RawMessage, location string, allowed ...string) error {
+	set := make(map[string]bool, len(allowed))
+	for _, key := range allowed {
+		set[key] = true
+	}
+	for key := range fields {
+		if !set[key] {
+			return fmt.Errorf("unknown field: %s.%s", location, key)
+		}
+	}
+	return nil
+}
+
+// encoding/json otherwise accepts duplicate and case-folded keys, allowing one
+// logical field to override another after validation.
+func rejectDuplicateKeys(raw []byte) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delimiter, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delimiter {
+		case '{':
+			seen := map[string]bool{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key := keyToken.(string)
+				if seen[key] {
+					return fmt.Errorf("duplicate JSON field: %s", key)
+				}
+				seen[key] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		default:
+			return errors.New("invalid JSON")
+		}
+		_, err = decoder.Token()
+		return err
+	}
+	return walk()
 }
 
 func missing(raw json.RawMessage) bool { return len(raw) == 0 || string(raw) == "null" }
