@@ -1,0 +1,3 @@
+{"id":"low-to-bright","request":{"userId":"eval-a","startMood":{"valence":0.15,"arousal":0.2,"source":"manual"},"targetMood":{"valence":0.85,"arousal":0.8},"trackCount":5,"taste":{"preferredGenres":["ambient"],"likedTrackIds":[]}}}
+{"id":"tense-to-calm","request":{"userId":"eval-b","startMood":{"valence":0.2,"arousal":0.85,"source":"manual"},"targetMood":{"valence":0.7,"arousal":0.2},"trackCount":5,"taste":{"preferredGenres":[],"likedTrackIds":[]}}}
+{"id":"steady-mood","request":{"userId":"eval-c","startMood":{"valence":0.6,"arousal":0.5,"source":"manual"},"targetMood":{"valence":0.6,"arousal":0.5},"trackCount":4,"taste":{"preferredGenres":[],"likedTrackIds":[]}}}

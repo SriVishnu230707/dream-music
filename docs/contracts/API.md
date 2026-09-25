@@ -1,6 +1,6 @@
 # Phase 0 API and event contracts
 
-These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Session and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
+These are version 1 contracts. Phase 2 implements mood prediction and confirmation locally. Phase 3 implements candidate generation locally. Phase 4 implements local session queue creation; retrieval and feedback endpoints remain future contracts. All coordinates use the inclusive range `[0, 1]`. Requests and responses use JSON and UTF-8.
 
 ## `POST /v1/candidates`
 
@@ -16,7 +16,7 @@ Input: `{ "valence": 0.25, "arousal": 0.2, "source": "user-corrected" }`. Output
 
 ## `POST /v1/sessions`
 
-Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null`. Do not persist raw text by default. `trackCount` is between 1 and 20. The response contains a generated `sessionId`, `status`, `catalogId`, `revision`, and ordered `queue`.
+Input conforms to [session-create.schema.json](session-create.schema.json). The confirmed `startMood` is authoritative; `checkInText` can be omitted or `null`. Do not persist raw text by default. `trackCount` is between 1 and 20. The Phase 4 local endpoint returns a generated `sessionId`, `status`, `catalogId`, `revision`, ordered `queue`, component scores, and quality metrics. The ID is ephemeral: sessions are not yet persisted or retrievable.
 
 Each queue item includes `position`, `trackId`, `pathPoint`, `score`, and `reason`. `pathPoint` is the requested valence–arousal point for that slot, not a claim about the listener's actual mood. For `trackCount = 1`, it equals `startMood`.
 

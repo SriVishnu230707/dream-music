@@ -1,6 +1,6 @@
 # Mood Drift Music — phased implementation plan
 
-**Status:** Phases 0–3 implemented locally; Phase 4 is next. This file is the execution plan. The README remains the project overview.
+**Status:** Phases 0–4 implemented locally; Phase 5 is next. This file is the execution plan. The README remains the project overview.
 
 ## Product target
 
