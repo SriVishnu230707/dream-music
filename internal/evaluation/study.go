@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/SriVishnu230707/dream-music/internal/sequence"
 )
@@ -34,13 +35,14 @@ type StudySummary struct {
 	MeanArousalChange *float64 `json:"meanArousalChange,omitempty"`
 }
 type StudyReport struct {
-	InputSHA256      string                  `json:"inputSha256"`
-	Synthetic        bool                    `json:"synthetic"`
-	Participants     int                     `json:"participants"`
-	CompleteTriplets int                     `json:"completeTriplets"`
-	ByStrategy       map[string]StudySummary `json:"byStrategy"`
-	OrderCounts      map[string][3]int       `json:"orderCounts"`
-	Note             string                  `json:"note"`
+	InputSHA256        string                  `json:"inputSha256"`
+	Synthetic          bool                    `json:"synthetic"`
+	Participants       int                     `json:"participants"`
+	CompleteTriplets   int                     `json:"completeTriplets"`
+	ByStrategy         map[string]StudySummary `json:"byStrategy"`
+	CompleteByStrategy map[string]StudySummary `json:"completeByStrategy"`
+	OrderCounts        map[string][3]int       `json:"orderCounts"`
+	Note               string                  `json:"note"`
 }
 
 func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
@@ -52,7 +54,7 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 		return StudyReport{}, errors.New("study input exceeds 8 MiB")
 	}
 	digest := sha256.Sum256(raw)
-	output := StudyReport{InputSHA256: hex.EncodeToString(digest[:]), ByStrategy: map[string]StudySummary{}, OrderCounts: map[string][3]int{}}
+	output := StudyReport{InputSHA256: hex.EncodeToString(digest[:]), ByStrategy: map[string]StudySummary{}, CompleteByStrategy: map[string]StudySummary{}, OrderCounts: map[string][3]int{}}
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
 	participants := map[string]map[string]StudyRow{}
@@ -61,6 +63,12 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 	for scanner.Scan() {
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
+		}
+		if len(sessions) >= 10000 {
+			return StudyReport{}, errors.New("study exceeds 10000 sessions")
+		}
+		if err := uniqueJSON(scanner.Bytes()); err != nil {
+			return StudyReport{}, err
 		}
 		var row StudyRow
 		dec := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
@@ -71,7 +79,7 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 		if dec.Decode(new(any)) != io.EOF {
 			return StudyReport{}, errors.New("trailing study row data")
 		}
-		if row.ParticipantID == "" || row.SessionID == "" || sessions[row.SessionID] || !row.Consent || row.IsSynthetic == nil || row.Order < 1 || row.Order > 3 || row.RelevanceRating < 1 || row.RelevanceRating > 5 || row.CoherenceRating < 1 || row.CoherenceRating > 5 {
+		if !safeID.MatchString(row.ParticipantID) || !safeID.MatchString(row.SessionID) || sessions[row.SessionID] || !row.Consent || row.IsSynthetic == nil || row.Order < 1 || row.Order > 3 || row.RelevanceRating < 1 || row.RelevanceRating > 5 || row.CoherenceRating < 1 || row.CoherenceRating > 5 {
 			return StudyReport{}, errors.New("invalid or unconsented study row")
 		}
 		if row.Strategy != "popularity" && row.Strategy != "taste" && row.Strategy != "drift" {
@@ -94,20 +102,7 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 		}
 		participants[row.ParticipantID][row.Strategy] = row
 		sessions[row.SessionID] = true
-		summary := output.ByStrategy[row.Strategy]
-		summary.Sessions++
-		summary.MeanRelevance += float64(row.RelevanceRating)
-		summary.MeanCoherence += float64(row.CoherenceRating)
-		if row.Before != nil {
-			summary.MoodPairs++
-			if summary.MeanValenceChange == nil {
-				summary.MeanValenceChange = new(float64)
-				summary.MeanArousalChange = new(float64)
-			}
-			*summary.MeanValenceChange += row.After.Valence - row.Before.Valence
-			*summary.MeanArousalChange += row.After.Arousal - row.Before.Arousal
-		}
-		output.ByStrategy[row.Strategy] = summary
+		output.ByStrategy[row.Strategy] = addStudyRow(output.ByStrategy[row.Strategy], row)
 		counts := output.OrderCounts[row.Strategy]
 		counts[row.Order-1]++
 		output.OrderCounts[row.Strategy] = counts
@@ -120,19 +115,25 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 	}
 	output.Synthetic = *cohort
 	output.Participants = len(participants)
-	for _, rows := range participants {
+	participantIDs := make([]string, 0, len(participants))
+	for id := range participants {
+		participantIDs = append(participantIDs, id)
+	}
+	sort.Strings(participantIDs)
+	for _, id := range participantIDs {
+		rows := participants[id]
 		if len(rows) == 3 {
 			output.CompleteTriplets++
+			for name, row := range rows {
+				output.CompleteByStrategy[name] = addStudyRow(output.CompleteByStrategy[name], row)
+			}
 		}
 	}
 	for name, summary := range output.ByStrategy {
-		summary.MeanRelevance /= float64(summary.Sessions)
-		summary.MeanCoherence /= float64(summary.Sessions)
-		if summary.MoodPairs > 0 {
-			*summary.MeanValenceChange /= float64(summary.MoodPairs)
-			*summary.MeanArousalChange /= float64(summary.MoodPairs)
-		}
-		output.ByStrategy[name] = summary
+		output.ByStrategy[name] = meanStudy(summary)
+	}
+	for name, summary := range output.CompleteByStrategy {
+		output.CompleteByStrategy[name] = meanStudy(summary)
 	}
 	if output.Synthetic {
 		output.Note = "Synthetic study-format check only; no participant outcome can be inferred."
@@ -140,6 +141,30 @@ func AnalyzeStudy(reader io.Reader) (StudyReport, error) {
 		output.Note = "Descriptive, self-reported outcomes; no causal or therapeutic claim. Inspect order balance and dropout before interpretation."
 	}
 	return output, nil
+}
+func addStudyRow(summary StudySummary, row StudyRow) StudySummary {
+	summary.Sessions++
+	summary.MeanRelevance += float64(row.RelevanceRating)
+	summary.MeanCoherence += float64(row.CoherenceRating)
+	if row.Before != nil {
+		summary.MoodPairs++
+		if summary.MeanValenceChange == nil {
+			summary.MeanValenceChange = new(float64)
+			summary.MeanArousalChange = new(float64)
+		}
+		*summary.MeanValenceChange += row.After.Valence - row.Before.Valence
+		*summary.MeanArousalChange += row.After.Arousal - row.Before.Arousal
+	}
+	return summary
+}
+func meanStudy(summary StudySummary) StudySummary {
+	summary.MeanRelevance /= float64(summary.Sessions)
+	summary.MeanCoherence /= float64(summary.Sessions)
+	if summary.MoodPairs > 0 {
+		*summary.MeanValenceChange /= float64(summary.MoodPairs)
+		*summary.MeanArousalChange /= float64(summary.MoodPairs)
+	}
+	return summary
 }
 func validStudyMood(m sequence.Mood) bool {
 	return !math.IsNaN(m.Valence) && !math.IsInf(m.Valence, 0) && m.Valence >= 0 && m.Valence <= 1 && !math.IsNaN(m.Arousal) && !math.IsInf(m.Arousal, 0) && m.Arousal >= 0 && m.Arousal <= 1

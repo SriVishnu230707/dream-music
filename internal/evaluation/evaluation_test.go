@@ -59,6 +59,9 @@ func TestRejectsLeakageAndFalseProvenance(t *testing.T) {
 		func(v map[string]any) { v["moodAsOf"] = "2026-01-04T00:00:00Z" },
 		func(v map[string]any) { v["popularityAsOf"] = "2026-01-04T00:00:00Z" },
 		func(v map[string]any) { v["request"].(map[string]any)["checkInText"] = "private mood disclosure" },
+		func(v map[string]any) { v["id"] = "name@example.com" },
+		func(v map[string]any) { v["relevant"].([]any)[0].(map[string]any)["trackId"] = "\x1b[31m" },
+		func(v map[string]any) { v["popularityCounts"].(map[string]any)["night-rain"] = -1 },
 	}
 	for _, change := range cases {
 		var candidate map[string]any
@@ -71,5 +74,13 @@ func TestRejectsLeakageAndFalseProvenance(t *testing.T) {
 	}
 	if _, err := Evaluate(c, strings.NewReader(first+"\n"+first), 5, 7); err == nil {
 		t.Fatal("duplicate user/case accepted")
+	}
+	duplicateField := strings.Replace(first, `"isSynthetic":true`, `"isSynthetic":true,"isSynthetic":false`, 1)
+	if _, err := Evaluate(c, strings.NewReader(duplicateField), 5, 7); err == nil {
+		t.Fatal("duplicate provenance key accepted")
+	}
+	duplicateNested := strings.Replace(first, `"trackCount":5`, `"trackCount":5,"trackCount":1`, 1)
+	if _, err := Evaluate(c, strings.NewReader(duplicateNested), 5, 7); err == nil {
+		t.Fatal("duplicate nested key accepted")
 	}
 }

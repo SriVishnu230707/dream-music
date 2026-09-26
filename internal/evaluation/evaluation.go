@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"regexp"
 	"sort"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 )
 
 const Version = "phase7-eval-v1"
+
+var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 type TimedEvent struct {
 	taste.Event
@@ -108,6 +111,12 @@ func Evaluate(c taste.Catalog, reader io.Reader, k int, seed int64) (Report, err
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
 		}
+		if len(out.PerCase) >= 1000 {
+			return Report{}, errors.New("evaluation exceeds 1000 cases")
+		}
+		if err := uniqueJSON(scanner.Bytes()); err != nil {
+			return Report{}, fmt.Errorf("case %d: %w", len(out.PerCase)+1, err)
+		}
 		var item Case
 		dec := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
 		dec.DisallowUnknownFields()
@@ -117,7 +126,7 @@ func Evaluate(c taste.Catalog, reader io.Reader, k int, seed int64) (Report, err
 		if dec.Decode(new(any)) != io.EOF {
 			return Report{}, errors.New("trailing case data")
 		}
-		if ids[item.ID] || item.ID == "" || users[item.Request.UserID] {
+		if !safeID.MatchString(item.ID) || !safeID.MatchString(item.Request.UserID) || ids[item.ID] || users[item.Request.UserID] {
 			return Report{}, errors.New("case IDs and users must be unique")
 		}
 		ids[item.ID], users[item.Request.UserID] = true, true
@@ -203,9 +212,26 @@ func validate(c taste.Catalog, item Case, k int) error {
 	if len(item.PopularityCounts) > 0 && (item.PopularityAsOf.IsZero() || item.PopularityAsOf.After(item.CutoffAt)) {
 		return errors.New("popularity counts must predate cutoff")
 	}
+	knownTrack := func(id string) bool {
+		if !safeID.MatchString(id) {
+			return false
+		}
+		_, ok := c.Track(id)
+		return ok
+	}
+	for _, id := range item.Request.Taste.LikedTrackIDs {
+		if !knownTrack(id) {
+			return errors.New("liked track is not in catalog")
+		}
+	}
+	for id, count := range item.PopularityCounts {
+		if !knownTrack(id) || count < 0 {
+			return errors.New("invalid popularity count or track")
+		}
+	}
 	eventIDs := map[string]bool{}
 	for _, e := range item.History {
-		if e.IsSynthetic == nil || *e.IsSynthetic != *item.IsSynthetic || e.OccurredAt.IsZero() || !e.OccurredAt.Before(item.CutoffAt) || eventIDs[e.EventID] {
+		if e.IsSynthetic == nil || *e.IsSynthetic != *item.IsSynthetic || e.OccurredAt.IsZero() || !e.OccurredAt.Before(item.CutoffAt) || !safeID.MatchString(e.EventID) || eventIDs[e.EventID] || !knownTrack(e.TrackID) {
 			return errors.New("history must match cohort, predate cutoff, and have unique event IDs")
 		}
 		eventIDs[e.EventID] = true
@@ -217,8 +243,8 @@ func validate(c taste.Catalog, item Case, k int) error {
 		if e.IsSynthetic == nil || *e.IsSynthetic != *item.IsSynthetic || e.OccurredAt.IsZero() || !e.OccurredAt.After(item.CutoffAt) {
 			return errors.New("relevance must match cohort and follow cutoff")
 		}
-		if _, ok := c.Track(e.TrackID); !ok {
-			return fmt.Errorf("relevant track %s is not in catalog", e.TrackID)
+		if !knownTrack(e.TrackID) {
+			return errors.New("relevant track is not in catalog")
 		}
 	}
 	return nil
