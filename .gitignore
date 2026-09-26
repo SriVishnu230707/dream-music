@@ -21,3 +21,6 @@ models/
 # Phase 5 frontend build
 web/dist/
 web/tsconfig.tsbuildinfo
+
+# Scratch artifacts
+scratch/
