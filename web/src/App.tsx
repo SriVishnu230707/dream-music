@@ -13,6 +13,7 @@ import {
   getTrackSpotifyId,
   getSpotifySearchUrl,
 } from "./data/catalog";
+import { planJourney } from "./data/plan";
 
 declare global {
   interface Window {
@@ -110,8 +111,8 @@ function createDefaultSession(): Session {
     currentIndex: 0,
     status: "ready",
     revision: 1,
-    retentionDays: 7,
-    expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+    retentionDays: 0,
+    expiresAt: "",
     lastCheckIn: queue[0].trackMood,
   };
 }
@@ -172,84 +173,31 @@ function isMelodyGenre(genre?: string, title?: string): boolean {
   );
 }
 
-// Sequence Planner across 1,000 songs — ALWAYS guarantees the drift ends up in a pure Melody
+// Local catalog planner. The chosen target remains the final path point.
 function generateSequenceFromCatalog(
   start: Mood,
   target: Mood,
   count: number,
-  retentionDays: number,
-  langFilter: "All" | "Tamil" | "English" = "All"
+  langFilter: "All" | "Tamil" | "English" = "All",
+  excludedIds: ReadonlySet<string> = new Set(),
 ): Session {
-  const candidates =
-    langFilter === "All"
-      ? CATALOG_TRACKS
-      : CATALOG_TRACKS.filter((t) => t.language === langFilter);
-
-  // All melody tracks in candidate pool
-  const melodyPool = candidates.filter((t) => isMelodyGenre(t.genre, t.title));
-  const finalMelodyPool = melodyPool.length > 0 ? melodyPool : candidates;
-
-  // The drift target always anchors to the peaceful melody centroid
-  const melodyDestV = 0.78;
-  const melodyDestA = 0.35;
-
-  const effectiveTargetV = (target.valence + melodyDestV) / 2;
-  const effectiveTargetA = (target.arousal + melodyDestA) / 2;
-
-  const queue: QueueItem[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const fraction = count <= 1 ? 1 : i / (count - 1);
-    const isDestination = i === count - 1;
-
-    // As fraction approaches 1, smoothly steer toward the pure melody destination
-    const pointV = isDestination ? melodyDestV : start.valence + (effectiveTargetV - start.valence) * fraction;
-    const pointA = isDestination ? melodyDestA : start.arousal + (effectiveTargetA - start.arousal) * fraction;
-
-    // The final destination track is STRICTLY chosen from the melody pool!
-    const pool = isDestination ? finalMelodyPool : candidates;
-
-    let best = pool[0];
-    let minDistance = Infinity;
-
-    for (const t of pool) {
-      const tm = t.mood ?? { valence: 0.5, arousal: 0.5 };
-      const d = Math.hypot(tm.valence - pointV, tm.arousal - pointA);
-      const penalty = queue.length > 0 && queue[queue.length - 1].trackId === t.id ? 0.45 : 0;
-      // Penultimate steps give an extra affinity bonus to melodious songs
-      const melodyBonus = (i >= count - 2 && isMelodyGenre(t.genre, t.title)) ? -0.15 : 0;
-
-      if (d + penalty + melodyBonus < minDistance) {
-        minDistance = d + penalty + melodyBonus;
-        best = t;
-      }
-    }
-
-    queue.push({
+  const queue: QueueItem[] = planJourney(CATALOG_TRACKS, start, target, count, langFilter, excludedIds)
+    .map((item, i) => ({
       position: i + 1,
-      trackId: best.id,
-      pathPoint: { valence: Number(pointV.toFixed(2)), arousal: Number(pointA.toFixed(2)) },
-      trackMood: best.mood ?? { valence: 0.5, arousal: 0.5 },
-      reason:
-        i === 0
-          ? `Starting vibe (${best.language}): ${best.genre}`
-          : isDestination
-          ? `🎯 Drift Resolution: Pure Melody (${best.title} · ${best.genre})`
-          : `Drift transition ${i + 1} (${best.language}): ${best.title}`,
-    });
-  }
-
-  const expires = new Date();
-  expires.setDate(expires.getDate() + retentionDays);
+      ...item,
+      reason: i === 0 ? "Closest playable start" :
+        i === count - 1 ? "Closest playable track to your selected target" :
+        "Gradual mood transition",
+    }));
 
   return {
-    sessionId: `drift-${Date.now()}`,
+    sessionId: `local-${crypto.randomUUID()}`,
     queue,
     currentIndex: 0,
     status: "active",
     revision: 1,
-    retentionDays,
-    expiresAt: expires.toISOString(),
+    retentionDays: 0,
+    expiresAt: "",
     lastCheckIn: start,
   };
 }
@@ -338,7 +286,6 @@ export default function App() {
   const [start, setStart] = useState<Mood>({ valence: 0.25, arousal: 0.35, source: "manual" });
   const [target, setTarget] = useState<Mood>({ valence: 0.78, arousal: 0.35 });
   const [count, setCount] = useState(6);
-  const [retentionDays, setRetentionDays] = useState(7);
   const [sessionMood, setSessionMood] = useState<Mood>({ valence: 0.5, arousal: 0.5, source: "manual" });
   const [journeyLanguage, setJourneyLanguage] = useState<"All" | "Tamil" | "English">("All");
 
@@ -365,11 +312,10 @@ export default function App() {
   const [duration, setDuration] = useState(30);
   const [volume, setVolume] = useState(0.95);
   const [isMuted, setIsMuted] = useState(false);
-  const [continuousLoop, setContinuousLoop] = useState(true);
+  const [continuousLoop, setContinuousLoop] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-  const [playbackMode, setPlaybackMode] = useState<"spotify" | "full" | "preview">("spotify");
-  const [spotifyClientId, setSpotifyClientId] = useState(() => localStorage.getItem("mood_drift_spotify_client_id") || "");
+  const [playbackMode, setPlaybackMode] = useState<"spotify" | "full" | "preview">("preview");
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
   const [ytBlocked, setYtBlocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"queue" | "studio" | "explore" | "audit" | "liked">("queue");
@@ -431,7 +377,7 @@ export default function App() {
                     startSeconds: 0,
                   });
                   event.target.playVideo();
-                  setPlaying(true);
+                  setPlaying(false);
                   pendingPlayRef.current = null;
                 }
               },
@@ -456,10 +402,11 @@ export default function App() {
                     event.target.playVideo();
                   } else {
                     if (shuffleMode) {
+                      void sendEvent("complete");
                       const randIdx = Math.floor(Math.random() * session.queue.length);
                       playQueueIndex(randIdx);
                     } else {
-                      skipTrack();
+                      skipTrack("complete");
                     }
                   }
                 }
@@ -541,7 +488,7 @@ export default function App() {
     }
   }, [volume, isMuted]);
 
-  // Direct Audio Fallback Player (Guaranteed to play without "Watch on YouTube" blocks)
+  // Try the catalog preview when a YouTube embed is unavailable.
   function playDirectAudioFallback(track: Track) {
     setYtBlocked(true);
     if (playbackWatchdog.current) {
@@ -565,6 +512,8 @@ export default function App() {
       setPlaying(true);
     }).catch((err) => {
       console.warn("Direct audio play error:", err);
+      setPlaying(false);
+      showToast("This preview is unavailable. Try another track or open its provider link.");
     });
   }
 
@@ -579,16 +528,21 @@ export default function App() {
       playbackWatchdog.current = null;
     }
 
-    // 1. Spotify Engine: Stream official full lengthy song via Spotify
+    // Spotify embeds have their own controls; the app cannot infer playback state.
     if (playbackMode === "spotify") {
+      if (!getTrackSpotifyId(track)) {
+        setPlaybackMode("preview");
+        playDirectAudioFallback(track);
+        return;
+      }
       if (audioRef.current) audioRef.current.pause();
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
         try { ytPlayerRef.current.pauseVideo(); } catch {}
       }
-      setPlaying(true);
+      setPlaying(false);
       setProgress(0);
       setDuration(track.durationSeconds || 210);
-      showToast(`🟢 Streaming "${track.title}" via Spotify Master`);
+      showToast(`Use the Spotify embed controls for "${track.title}".`);
       return;
     }
 
@@ -605,7 +559,7 @@ export default function App() {
             startSeconds: 0,
           });
           ytPlayerRef.current.playVideo();
-          setPlaying(true);
+          setPlaying(false);
           setProgress(0);
           setDuration(track.durationSeconds || 180);
 
@@ -626,7 +580,7 @@ export default function App() {
       } else if (yId) {
         pendingPlayRef.current = yId;
         setDuration(track.durationSeconds || 180);
-        setPlaying(true);
+        setPlaying(false);
         return;
       }
     }
@@ -638,8 +592,7 @@ export default function App() {
   // Play/Pause Toggle
   async function togglePlay() {
     if (playbackMode === "spotify") {
-      setPlaying(!playing);
-      showToast(playing ? "Spotify Player paused" : "Spotify Player playing");
+      showToast("Use the Spotify embed controls to play or pause.");
       return;
     }
 
@@ -650,8 +603,7 @@ export default function App() {
           setPlaying(false);
         } else {
           ytPlayerRef.current.playVideo();
-          setPlaying(true);
-          void sendEvent("start");
+          setPlaying(false);
         }
         return;
       } catch (err) {
@@ -678,7 +630,9 @@ export default function App() {
       try {
         await el.play();
         setPlaying(true);
+        void sendEvent("start");
       } catch {
+        setPlaying(false);
         showToast("Click Play to start audio.");
       }
     }
@@ -686,14 +640,18 @@ export default function App() {
 
   // Switch between Spotify, Full Song, and 30s Snippet
   function switchPlaybackMode(mode: "spotify" | "full" | "preview") {
+    if (mode === "spotify" && !getTrackSpotifyId(currentTrack)) {
+      showToast("No verified Spotify embed for this track. Open Spotify search instead.");
+      return;
+    }
     setPlaybackMode(mode);
     if (mode === "spotify") {
       if (audioRef.current) audioRef.current.pause();
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
         try { ytPlayerRef.current.pauseVideo(); } catch {}
       }
-      setPlaying(true);
-      showToast("🟢 Spotify Full Song Engine Active (High Fidelity)");
+      setPlaying(false);
+      showToast("Use the embedded Spotify controls to play this track.");
     } else if (mode === "full") {
       if (audioRef.current) audioRef.current.pause();
       const yId = currentTrack?.youtubeId || CATALOG_MAP[currentTrack?.id]?.youtubeId;
@@ -703,9 +661,9 @@ export default function App() {
           startSeconds: Math.floor(progress),
         });
         ytPlayerRef.current.playVideo();
-        setPlaying(true);
+        setPlaying(false);
       }
-      showToast("🎵 YouTube Full Video Engine Active");
+      showToast("YouTube video player selected. Playback depends on video availability.");
     } else {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
         ytPlayerRef.current.pauseVideo();
@@ -715,7 +673,10 @@ export default function App() {
         const url = currentTrack.audioUrl || CATALOG_MAP[currentTrack.id]?.audioUrl;
         if (url && el.src !== url) el.src = url;
         el.currentTime = Math.min(progress, 28);
-        el.play().then(() => setPlaying(true)).catch(() => {});
+        el.play().then(() => setPlaying(true)).catch(() => {
+          setPlaying(false);
+          showToast("Preview unavailable. Try the YouTube player or another track.");
+        });
       }
       showToast("⚡ 30-second preview mode active");
     }
@@ -728,7 +689,7 @@ export default function App() {
     const targetTrack = CATALOG_MAP[targetItem.trackId] || tracks[targetItem.trackId];
 
     setSession((s) => ({ ...s, currentIndex: idx, status: "active" }));
-    setPlaying(true);
+    setPlaying(false);
 
     if (targetTrack) {
       startPlayback(targetTrack);
@@ -742,7 +703,7 @@ export default function App() {
       try {
         ytPlayerRef.current.seekTo(0, true);
         ytPlayerRef.current.playVideo();
-        setPlaying(true);
+        setPlaying(false);
         setProgress(0);
         void sendEvent("replay");
         showToast(`Replaying ${currentTrack.title}`);
@@ -762,10 +723,19 @@ export default function App() {
   }
 
   // Skip
-  function skipTrack() {
-    const nextIdx = (session.currentIndex + 1) % session.queue.length;
+  function skipTrack(action: "skip" | "complete" = "skip") {
+    if (session.status === "completed") return;
+    void sendEvent(action);
+    const nextIdx = session.currentIndex + 1;
+    if (nextIdx >= session.queue.length) {
+      audioRef.current?.pause();
+      try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
+      setSession((s) => ({ ...s, status: "completed" }));
+      setPlaying(false);
+      showToast("Journey finished. Choose a song or create a new path.");
+      return;
+    }
     playQueueIndex(nextIdx);
-    void sendEvent("skip");
   }
 
   // Send Event / Handle Playback State
@@ -782,26 +752,26 @@ export default function App() {
       expectedRevision: session.revision,
     };
 
-    setAuditEvents((events) => [
-      ...events,
-      {
+    try {
+      if (session.sessionId.startsWith("session-")) {
+        const result = await api<EventResult>(
+          `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/events`,
+          "POST", payload,
+        );
+        setSession(result.session);
+      }
+      setAuditEvents((events) => [...events, {
         eventId: payload.eventId,
         trackId: payload.trackId,
         type,
         occurredAt: payload.occurredAt,
         acceptedAt: new Date().toISOString(),
-      },
-    ]);
-
-    try {
-      await api<EventResult>(
-        `/api/v1/sessions/${encodeURIComponent(session.sessionId)}/events`,
-        "POST",
-        payload
-      );
-    } catch {}
-
-    advancing.current = false;
+      }]);
+    } catch (error) {
+      showToast(`Feedback was not saved: ${(error as Error).message}`);
+    } finally {
+      advancing.current = false;
+    }
   }
 
   // Direct track play from catalog
@@ -823,7 +793,7 @@ export default function App() {
       setSession((s) => ({ ...s, queue: newQueue, currentIndex: s.currentIndex + 1, status: "active" }));
     }
 
-    setPlaying(true);
+    setPlaying(false);
     startPlayback(fresh);
     showToast(`Playing ${fresh.title} (${fresh.language})`);
   }
@@ -836,7 +806,7 @@ export default function App() {
     } else {
       setLikedTrackIDs((ids) => [...ids, trackId]);
       showToast("Added to Liked Songs ♥");
-      void sendEvent("like");
+      if (trackId === currentTrack.id) void sendEvent("like");
     }
   }
 
@@ -875,14 +845,14 @@ export default function App() {
         v = 0.75;
         a = 0.60;
       }
-      setStart({ valence: v, arousal: a, source: "text-model", confidence: 0.88 });
+      setStart({ valence: v, arousal: a, source: "manual" });
       setPrediction({
         suggestedMood: { valence: v, arousal: a },
-        confidence: 0.88,
-        needsManualSelection: false,
-        reason: "Tamil & English sentiment inference",
+        confidence: null,
+        needsManualSelection: true,
+        reason: "Local keyword fallback; review the mood sliders before continuing",
       });
-      showToast("Mood suggestion ready based on your check-in!");
+      showToast("Prediction service unavailable. Review the local keyword suggestion.");
     } finally {
       setBusy(false);
     }
@@ -897,34 +867,46 @@ export default function App() {
   // Create New Journey Session across 1000 songs
   function createJourney() {
     setBusy(true);
-    const data = generateSequenceFromCatalog(start, target, count, retentionDays, journeyLanguage);
-    setSession(data);
-    setSessionMood({
-      valence: data.queue[0]?.trackMood.valence ?? start.valence,
-      arousal: data.queue[0]?.trackMood.arousal ?? start.arousal,
-      source: "manual",
-    });
-    setProgress(0);
-    setPlaying(true);
-    setActiveTab("queue");
-    showToast(`Generated journey across 1,000 ${journeyLanguage !== "All" ? journeyLanguage : "Tamil & English"} songs!`);
-    setBusy(false);
+    try {
+      audioRef.current?.pause();
+      try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
+      const data = generateSequenceFromCatalog(start, target, count, journeyLanguage);
+      setSession(data);
+      setSessionMood({ ...start, source: "manual" });
+      setAuditEvents([]);
+      setAuditCheckIns([]);
+      setProgress(0);
+      setPlaying(false);
+      setActiveTab("queue");
+      showToast(`Local journey ready. Press Play for the first track.`);
+    } catch (error) {
+      showToast((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Mid-Session Mood Update
   function submitCheckIn() {
     const remaining = session.queue.length - (session.currentIndex + 1);
     if (remaining > 0) {
-      const fresh = generateSequenceFromCatalog(sessionMood, target, remaining + 1, session.retentionDays, journeyLanguage);
-      const newQueue = [
-        ...session.queue.slice(0, session.currentIndex + 1),
-        ...fresh.queue.slice(1).map((item, idx) => ({
-          ...item,
-          position: session.currentIndex + 2 + idx,
-          reason: `Recalibrated step: ${CATALOG_MAP[item.trackId]?.title || item.trackId}`,
-        })),
-      ];
-      setSession((s) => ({ ...s, queue: newQueue, revision: s.revision + 1, lastCheckIn: sessionMood }));
+      try {
+        const locked = session.queue.slice(0, session.currentIndex + 1);
+        const excluded = new Set(locked.map((item) => item.trackId));
+        const fresh = generateSequenceFromCatalog(sessionMood, target, remaining, journeyLanguage, excluded);
+        const newQueue = [
+          ...locked,
+          ...fresh.queue.map((item, idx) => ({
+            ...item,
+            position: locked.length + idx + 1,
+            reason: `Recalibrated step: ${CATALOG_MAP[item.trackId]?.title || item.trackId}`,
+          })),
+        ];
+        setSession((s) => ({ ...s, queue: newQueue, revision: s.revision + 1, lastCheckIn: sessionMood }));
+      } catch (error) {
+        showToast((error as Error).message);
+        return;
+      }
     }
     setAuditCheckIns((items) => [
       ...items,
@@ -995,10 +977,11 @@ export default function App() {
         onEnded={() => {
           if (!continuousLoop) {
             if (shuffleMode) {
+              void sendEvent("complete");
               const randIdx = Math.floor(Math.random() * session.queue.length);
               playQueueIndex(randIdx);
             } else {
-              skipTrack();
+              skipTrack("complete");
             }
           }
         }}
@@ -1015,6 +998,8 @@ export default function App() {
         }}
         onError={(e) => {
           console.warn("Audio element error:", e);
+          setPlaying(false);
+          showToast("Preview unavailable. Try the YouTube player or another track.");
         }}
       />
 
@@ -1067,7 +1052,7 @@ export default function App() {
           </div>
         </div>
         <div className="mini-player-viewport">
-          {playbackMode === "spotify" ? (
+          {playbackMode === "spotify" && getTrackSpotifyId(currentTrack) ? (
             <iframe
               key={currentTrack.id}
               src={`https://open.spotify.com/embed/track/${getTrackSpotifyId(currentTrack)}?utm_source=generator&theme=0`}
@@ -1153,9 +1138,9 @@ export default function App() {
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="#1ed760">
                     <path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10s10-4.476 10-10c0-5.523-4.477-10-10-10zm4.586 14.424a.623.623 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.624.624 0 0 1-.277-1.217c3.81-.871 7.078-.496 9.712 1.116a.625.625 0 0 1 .207.858zm1.225-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 1 1-.453-1.493c3.632-1.102 8.147-.568 11.233 1.33a.78.78 0 0 1 .257 1.072zm.105-2.835C14.692 8.95 8.085 8.73 4.708 9.756a.936.936 0 1 1-.545-1.791c3.955-1.2 11.258-.95 15.084 1.32a.936.936 0 1 1-1.33 1.581z"/>
                   </svg>
-                  Spotify API & Full Song Engine
+                  Spotify Links & Embeds
                 </span>
-                <small>High-fidelity, full-length commercial songs & audio features</small>
+                <small>Open the matching song on Spotify</small>
               </div>
               <button
                 className="btn-canvas-close"
@@ -1167,29 +1152,10 @@ export default function App() {
             </div>
             <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
               <div style={{ background: "rgba(30, 215, 96, 0.08)", border: "1px solid rgba(30, 215, 96, 0.25)", borderRadius: "var(--radius-md)", padding: "14px 16px" }}>
-                <h4 style={{ color: "#1ed760", margin: "0 0 6px 0", fontSize: "0.95rem" }}>🟢 Spotify Engine Active</h4>
+                <h4 style={{ color: "#1ed760", margin: "0 0 6px 0", fontSize: "0.95rem" }}>Spotify availability</h4>
                 <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                  The app automatically embeds official Spotify Player frames. If you are logged into Spotify in this browser, you get <strong>full-length, high-definition tracks (3-5+ mins)</strong> with seamless library sync!
+                  This catalog has no verified Spotify track IDs yet. Search links open Spotify for the current song; availability and playback depend on Spotify. A developer client ID alone does not enable streaming in this app.
                 </p>
-              </div>
-
-              <div className="control-group">
-                <label className="control-label">
-                  Spotify Developer Client ID (Optional)
-                </label>
-                <input
-                  type="text"
-                  className="spotify-input"
-                  placeholder="e.g. 5a1b2c3d4e5f6g7h8i9j0k..."
-                  value={spotifyClientId}
-                  onChange={(e) => {
-                    setSpotifyClientId(e.target.value);
-                    localStorage.setItem("mood_drift_spotify_client_id", e.target.value);
-                  }}
-                />
-                <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>
-                  Create a free app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" style={{ color: "#1ed760" }}>developer.spotify.com/dashboard</a> to enable custom Web Playback SDK streaming.
-                </span>
               </div>
 
               <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
@@ -1199,18 +1165,18 @@ export default function App() {
                   onClick={() => {
                     switchPlaybackMode("spotify");
                     setShowSpotifyModal(false);
-                    showToast("🟢 Spotify Engine set as Primary Player!");
                   }}
+                  disabled={!getTrackSpotifyId(currentTrack)}
                 >
-                  Set Spotify as Default Player
+                  Play verified Spotify embed
                 </button>
                 <a
-                  href={`https://open.spotify.com/track/${getTrackSpotifyId(currentTrack)}`}
+                  href={getSpotifySearchUrl(currentTrack)}
                   target="_blank"
                   rel="noreferrer"
                   style={{ display: "grid", placeItems: "center", padding: "10px 18px", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "20px", color: "#fff", textDecoration: "none", fontSize: "0.84rem", fontWeight: 700 }}
                 >
-                  Open Current Track ↗
+                  Search Current Track ↗
                 </a>
               </div>
             </div>
@@ -1559,7 +1525,7 @@ export default function App() {
 
                 <button
                   className="btn-secondary-action"
-                  onClick={skipTrack}
+                  onClick={() => skipTrack()}
                 >
                   Skip Track ⏭
                 </button>
@@ -2162,7 +2128,7 @@ export default function App() {
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                       <polygon points="5 3 19 12 5 21 5 3" />
                     </svg>
-                    Create Listening Path (Drift to Melody)
+                    Create Listening Path
                   </button>
                 </div>
               </div>
@@ -2174,10 +2140,11 @@ export default function App() {
             <div className="studio-panel" style={{ maxWidth: "800px", margin: "16px auto" }}>
               <h3>Privacy & Session Data</h3>
               <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", margin: 0 }}>
-                Active session expires on{" "}
-                <strong>{new Date(session.expiresAt).toLocaleDateString()}</strong>.
-                Raw check-in text is never persisted to database.
+                This catalog journey and its activity log are held in this browser tab only and clear when the page reloads. Mood text is sent to the local prediction service only when you request a suggestion. External music links may send browsing data to their providers.
               </p>
+              <button type="button" className="secondary" onClick={() => { setAuditEvents([]); setAuditCheckIns([]); setCheckIn(""); showToast("Local activity and mood text cleared."); }}>
+                Clear local activity and mood text
+              </button>
 
               {/* Playback Events List */}
               <div style={{ marginTop: "16px" }}>
@@ -2352,7 +2319,7 @@ export default function App() {
             {/* Skip */}
             <button
               className="control-btn"
-              onClick={skipTrack}
+              onClick={() => skipTrack()}
               title="Skip"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
@@ -2408,14 +2375,15 @@ export default function App() {
             <button
               className={`mode-pill spotify-pill ${playbackMode === "spotify" ? "active" : ""}`}
               onClick={() => switchPlaybackMode("spotify")}
-              title="Stream official full lengthy song directly through Spotify Master"
+              disabled={!getTrackSpotifyId(currentTrack)}
+              title={getTrackSpotifyId(currentTrack) ? "Play verified Spotify embed" : "No verified Spotify embed; use the search link"}
             >
               🟢 Spotify
             </button>
             <button
               className={`mode-pill ${playbackMode === "full" ? "active" : ""}`}
               onClick={() => switchPlaybackMode("full")}
-              title="Play complete full-length YouTube video & audio (3-5+ mins)"
+              title="Play the linked YouTube video when embedding is available"
             >
               🎵 YouTube
             </button>
