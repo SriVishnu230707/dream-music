@@ -1,6 +1,6 @@
 # Mood Drift Music — phased implementation plan
 
-**Status:** Phases 0–6 implemented locally; Phase 7 is next. This file is the execution plan. The README remains the project overview.
+**Status:** Phases 0–7 implemented locally. Phase 7's evaluation tooling is ready; real held-out and consented study data have not been collected. The README remains the project overview.
 
 ## Product target
 
@@ -159,4 +159,4 @@ Use a Go monolith for application logic and one Python service for model inferen
 
 The dependency path is **catalog/permissions → schemas → reproducible data → classifier and taste baselines → sequencer → player → adaptation → comparative evaluation**. Work on the UI shell can proceed once Phase 0 contracts are fixed, but do not make provider integration the critical path.
 
-The next implementation task is **Phase 7**: compare the adaptive sequence with popularity and taste-only baselines using held-out and consented session data.
+The next research task is to collect consented, real held-out cases and run the Phase 7 comparison. Phase 8 extensions follow only when the evidence supports them.

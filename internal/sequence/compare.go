@@ -15,7 +15,8 @@ func Baseline(c taste.Catalog, req Request, strategy string) (Plan, error) {
 		return Plan{}, fmt.Errorf("unsupported baseline: %s", strategy)
 	}
 	ranked, err := taste.Rank(c, taste.Request{UserID: req.UserID, Strategy: strategy,
-		Limit: req.TrackCount, PreferredGenres: req.Taste.PreferredGenres, LikedTrackIDs: req.Taste.LikedTrackIDs})
+		Limit: req.TrackCount, PreferredGenres: req.Taste.PreferredGenres, LikedTrackIDs: req.Taste.LikedTrackIDs,
+		Events: req.FeedbackEvents, PopularityCounts: req.PopularityCounts})
 	if err != nil {
 		return Plan{}, err
 	}

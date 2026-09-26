@@ -1,0 +1,3 @@
+{"participantId":"synthetic-p1","sessionId":"synthetic-s1","strategy":"popularity","order":1,"consent":true,"isSynthetic":true,"relevanceRating":3,"coherenceRating":2,"beforeMood":{"valence":0.3,"arousal":0.7},"afterMood":{"valence":0.4,"arousal":0.6}}
+{"participantId":"synthetic-p1","sessionId":"synthetic-s2","strategy":"taste","order":2,"consent":true,"isSynthetic":true,"relevanceRating":4,"coherenceRating":3,"beforeMood":{"valence":0.3,"arousal":0.7},"afterMood":{"valence":0.5,"arousal":0.6}}
+{"participantId":"synthetic-p1","sessionId":"synthetic-s3","strategy":"drift","order":3,"consent":true,"isSynthetic":true,"relevanceRating":4,"coherenceRating":4,"beforeMood":{"valence":0.3,"arousal":0.7},"afterMood":{"valence":0.6,"arousal":0.5}}

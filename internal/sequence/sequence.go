@@ -39,8 +39,9 @@ type Request struct {
 	Taste         TasteInput `json:"taste"`
 	RetentionDays int        `json:"retentionDays,omitempty"`
 	// Internal session adaptation inputs. They are never accepted from session JSON.
-	ExcludeTrackIDs []string      `json:"-"`
-	FeedbackEvents  []taste.Event `json:"-"`
+	ExcludeTrackIDs  []string         `json:"-"`
+	FeedbackEvents   []taste.Event    `json:"-"`
+	PopularityCounts map[string]int64 `json:"-"`
 }
 
 type QueueItem struct {
