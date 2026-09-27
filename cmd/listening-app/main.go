@@ -28,11 +28,25 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	store, err := session.Open(ctx, os.Getenv("DATABASE_URL"))
-	if err != nil {
-		log.Fatal(err)
+	type sessionStore interface {
+		session.Store
+		Close() error
+		PurgeExpired(context.Context) error
+	}
+	var store sessionStore
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pgStore, err := session.Open(ctx, dsn)
+		cancel()
+		if err != nil {
+			log.Printf("PostgreSQL connection failed (%v); using in-memory store", err)
+			store = session.NewMemoryStore()
+		} else {
+			store = pgStore
+		}
+	} else {
+		log.Printf("DATABASE_URL not set; running with in-memory session store")
+		store = session.NewMemoryStore()
 	}
 	defer store.Close()
 	// PostgreSQL cascades remove each expired session's feedback and check-ins.
