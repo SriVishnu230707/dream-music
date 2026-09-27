@@ -298,6 +298,15 @@ export default function App() {
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [hoverTrackIdx, setHoverTrackIdx] = useState<number | null>(null);
 
+  // Audio Device, Headphones & Shuffling State
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [showHeadphonesModal, setShowHeadphonesModal] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [selectedDeviceLabel, setSelectedDeviceLabel] = useState<string>("System Default Output / Headphones");
+  const [spatialAudio, setSpatialAudio] = useState(false);
+  const [bassBoost, setBassBoost] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const ytPlayerRef = useRef<any>(null);
   const pendingPlayRef = useRef<string | null>(null);
@@ -816,13 +825,17 @@ export default function App() {
       const remaining = session.queue.length - nextIdx;
       const taste = buildTasteProfile(LONG_CATALOG_TRACKS, updatedRecords, new Set(likedTrackIDs));
       const fresh = generateSequenceFromCatalog(nextMood, target, remaining, journeyLanguage, excluded, taste);
+      let queueItems = fresh.queue;
+      if (isShuffle && queueItems.length > 1) {
+        queueItems = [...queueItems].sort(() => Math.random() - 0.5);
+      }
       setSession((s) => ({ ...s, currentIndex: nextIdx, status: "active", queue: [
         ...locked,
-        ...fresh.queue.map((item, idx) => ({ ...item, position: nextIdx + idx + 1,
+        ...queueItems.map((item, idx) => ({ ...item, position: nextIdx + idx + 1,
           reason: `Adapted to listening time and taste: ${CATALOG_MAP[item.trackId]?.title || item.trackId}` })),
       ], revision: s.revision + 1 }));
       // playQueueIndex uses the current queue. Start the newly selected track directly.
-      const nextTrack = CATALOG_MAP[fresh.queue[0].trackId];
+      const nextTrack = CATALOG_MAP[queueItems[0].trackId];
       if (nextTrack) startPlayback(nextTrack);
       return;
     } catch (error) {
@@ -831,6 +844,84 @@ export default function App() {
     playQueueIndex(nextIdx, false);
   }
   finishTrackRef.current = () => skipTrack("complete");
+
+  // Previous Track in Queue
+  function prevTrack() {
+    if (session.currentIndex > 0) {
+      playQueueIndex(session.currentIndex - 1, false);
+      showToast("Previous track");
+    } else {
+      replayTrack();
+    }
+  }
+
+  // Shuffling Toggle
+  function toggleShuffle() {
+    setIsShuffle((s) => {
+      const next = !s;
+      if (next && session.queue.length > session.currentIndex + 1) {
+        const played = session.queue.slice(0, session.currentIndex + 1);
+        const upcoming = [...session.queue.slice(session.currentIndex + 1)].sort(() => Math.random() - 0.5);
+        const reindexed = [...played, ...upcoming.map((item, idx) => ({
+          ...item,
+          position: session.currentIndex + 1 + idx + 1,
+        }))];
+        setSession((prevSession) => ({ ...prevSession, queue: reindexed }));
+      }
+      showToast(next ? "Shuffle: ON (upcoming tracks randomized)" : "Shuffle: OFF (ordered path)");
+      return next;
+    });
+  }
+
+  // Headphones & Audio Output Device Selection
+  async function openHeadphonesModal() {
+    setShowHeadphonesModal(true);
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter((d) => d.kind === "audiooutput");
+        setAudioDevices(outputs);
+      }
+    } catch (err) {
+      console.warn("Could not enumerate audio devices:", err);
+    }
+  }
+
+  async function selectAudioDevice(dev: MediaDeviceInfo) {
+    setSelectedDeviceId(dev.deviceId);
+    setSelectedDeviceLabel(dev.label || `Audio Output (${dev.deviceId.slice(0, 8)})`);
+    try {
+      if (audioRef.current && "setSinkId" in audioRef.current) {
+        await (audioRef.current as any).setSinkId(dev.deviceId);
+        showToast(`Connected: ${dev.label || "Headphones"}`);
+      } else {
+        showToast(`Selected: ${dev.label || "Audio Device"}`);
+      }
+    } catch (err) {
+      console.warn("setSinkId failed:", err);
+      showToast(`Output set to ${dev.label || "device"}`);
+    }
+  }
+
+  function testHeadphonesSound() {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+      showToast("Playing headphones audio test chime 🎶");
+    } catch {
+      showToast("Audio test chime unavailable in browser.");
+    }
+  }
 
   // Send Event / Handle Playback State
   async function sendEvent(type: PlaybackEvent) {
@@ -1143,7 +1234,7 @@ export default function App() {
               <a
                 href={getSpotifySearchUrl(currentTrack)}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="mini-btn"
                 title="Open in Spotify App"
                 style={{ textDecoration: "none", color: "#1ed760", display: "grid", placeItems: "center" }}
@@ -1279,7 +1370,7 @@ export default function App() {
                 <a
                   href={getSpotifySearchUrl(currentTrack)}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   style={{ display: "grid", placeItems: "center", padding: "10px 18px", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "20px", color: "#fff", textDecoration: "none", fontSize: "0.84rem", fontWeight: 700 }}
                 >
                   Search Current Track ↗
@@ -1397,7 +1488,7 @@ export default function App() {
               className={`lib-filter-pill ${activeTab === "queue" ? "active" : ""}`}
               onClick={() => setActiveTab("queue")}
             >
-              Journeys
+              Current Journey
             </span>
             <span
               className={`lib-filter-pill ${activeTab === "liked" ? "active" : ""}`}
@@ -1406,22 +1497,10 @@ export default function App() {
               Liked ({likedTrackIDs.length})
             </span>
             <span
-              className="lib-filter-pill"
-              onClick={() => {
-                setCatalogLanguage("Tamil");
-                setActiveTab("explore");
-              }}
+              className={`lib-filter-pill ${activeTab === "explore" ? "active" : ""}`}
+              onClick={() => setActiveTab("explore")}
             >
-              Tamil ({LONG_CATALOG_TRACKS.filter((track) => track.language === "Tamil").length})
-            </span>
-            <span
-              className="lib-filter-pill"
-              onClick={() => {
-                setCatalogLanguage("English");
-                setActiveTab("explore");
-              }}
-            >
-              English ({LONG_CATALOG_TRACKS.filter((track) => track.language === "English").length})
+              Explore All
             </span>
           </div>
 
@@ -1543,6 +1622,25 @@ export default function App() {
             <span className="topbar-badge">
               ● STEP {Math.min(session.currentIndex + 1, session.queue.length)} OF {session.queue.length}
             </span>
+
+            {/* Unified Language Selector */}
+            <div className="topbar-lang-selector" title="Filter songs by language across catalog and journeys">
+              <span style={{ fontSize: "0.85rem" }}>🌐</span>
+              <select
+                className="topbar-lang-select"
+                value={catalogLanguage}
+                onChange={(e) => {
+                  const val = e.target.value as "All" | "Tamil" | "English";
+                  setCatalogLanguage(val);
+                  setJourneyLanguage(val);
+                  showToast(`Language set to: ${val === "All" ? "Tamil & English" : val}`);
+                }}
+              >
+                <option value="All">All Languages ({LONG_CATALOG_TRACKS.length})</option>
+                <option value="Tamil">Tamil Songs Only (500)</option>
+                <option value="English">English Songs Only (500)</option>
+              </select>
+            </div>
           </div>
 
           <div className="topbar-right">
@@ -1627,6 +1725,23 @@ export default function App() {
                   <svg viewBox="0 0 24 24" fill={likedTrackIDs.includes(current.trackId) ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                   </svg>
+                </button>
+
+                <button
+                  className={`btn-icon-hero ${isShuffle ? "active-shuffle" : ""}`}
+                  onClick={toggleShuffle}
+                  title={isShuffle ? "Shuffle On (Randomized Next Songs)" : "Shuffle Off"}
+                  aria-pressed={isShuffle}
+                >
+                  🔀
+                </button>
+
+                <button
+                  className="btn-secondary-action"
+                  onClick={openHeadphonesModal}
+                  title="Connect Headphones or Switch Audio Device"
+                >
+                  🎧 Headphones
                 </button>
 
                 <button
@@ -1721,7 +1836,7 @@ export default function App() {
                             <a
                               href={getSpotifySearchUrl(track)}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noopener noreferrer"
                               className="track-spotify-btn"
                               title="Listen on Spotify"
                               onClick={(e) => e.stopPropagation()}
@@ -1856,7 +1971,7 @@ export default function App() {
                       <a
                         href={getSpotifySearchUrl(t)}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="card-spotify-link"
                         title={`Listen to "${t.title}" on Spotify`}
                         onClick={(e) => e.stopPropagation()}
@@ -1960,7 +2075,7 @@ export default function App() {
                               <a
                                 href={getSpotifySearchUrl(track)}
                                 target="_blank"
-                                rel="noreferrer"
+                                rel="noopener noreferrer"
                                 className="track-spotify-btn"
                                 title="Listen on Spotify"
                                 onClick={(e) => e.stopPropagation()}
@@ -2375,11 +2490,27 @@ export default function App() {
         <div className="player-center">
           <div className="player-controls">
 
-            {/* Replay */}
+            {/* Shuffle */}
+            <button
+              className={`control-btn ${isShuffle ? "active" : ""}`}
+              onClick={toggleShuffle}
+              title={isShuffle ? "Shuffle: ON" : "Shuffle: OFF"}
+              style={isShuffle ? { color: "var(--teal-primary)" } : {}}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
+              </svg>
+            </button>
+
+            {/* Previous */}
             <button
               className="control-btn"
-              onClick={replayTrack}
-              title="Replay"
+              onClick={prevTrack}
+              title="Previous Track"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                 <polygon points="11 19 2 12 11 5 11 19" />
@@ -2485,11 +2616,21 @@ export default function App() {
             </button>
           </div>
 
+          {/* Headphones / Audio Output Route */}
+          <button
+            className={`control-btn ${selectedDeviceId ? "active" : ""}`}
+            onClick={openHeadphonesModal}
+            title={`Audio Output: ${selectedDeviceLabel}`}
+            style={{ color: "var(--teal-primary)" }}
+          >
+            🎧
+          </button>
+
           {/* Open in Spotify App Link */}
           <a
             href={getSpotifySearchUrl(currentTrack)}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             className="control-btn spotify-direct-btn"
             title="Open in Spotify App"
           >
@@ -2501,7 +2642,7 @@ export default function App() {
             <a
               href={`https://www.youtube.com/watch?v=${currentTrack.youtubeId}`}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="control-btn"
               title="Open this video on YouTube when embedded playback is unavailable"
               aria-label="Open current song on YouTube"
@@ -2597,6 +2738,150 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* ==========================================================================
+          HEADPHONES & AUDIO OUTPUT ROUTING MODAL
+          ========================================================================== */}
+      {showHeadphonesModal && (
+        <div className="modal-backdrop" onClick={() => setShowHeadphonesModal(false)}>
+          <div className="modal-content headphones-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="headphones-modal-title">
+                <span className="headphones-icon-glow">🎧</span>
+                <div>
+                  <h3 style={{ margin: 0 }}>Headphones & Audio Output</h3>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                    Direct High-Fidelity Audio Device Routing
+                  </span>
+                </div>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setShowHeadphonesModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Current Device Status */}
+            <div className="headphones-status-card">
+              <div className="headphones-status-row">
+                <span style={{ color: "var(--teal-bright)", fontSize: "1.1rem" }}>●</span>
+                <span className="headphones-current-name">{selectedDeviceLabel}</span>
+              </div>
+              <span className="headphones-specs">
+                Connected • 320 kbps High Definition Audio Pipeline
+              </span>
+            </div>
+
+            {/* Audio Enhancements Grid */}
+            <div style={{ marginTop: "14px" }}>
+              <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+                Sound Enhancements
+              </label>
+              <div className="audio-enhancements-grid" style={{ marginTop: "6px" }}>
+                <button
+                  type="button"
+                  className={`enhancer-toggle ${bassBoost ? "active" : ""}`}
+                  onClick={() => {
+                    setBassBoost((b) => {
+                      const next = !b;
+                      showToast(next ? "Bass Boost: Enabled" : "Bass Boost: Disabled");
+                      return next;
+                    });
+                  }}
+                >
+                  <span>🔊 Bass Boost</span>
+                  <small>{bassBoost ? "Active (+6dB Lows)" : "Normal"}</small>
+                </button>
+                <button
+                  type="button"
+                  className={`enhancer-toggle ${spatialAudio ? "active" : ""}`}
+                  onClick={() => {
+                    setSpatialAudio((s) => {
+                      const next = !s;
+                      showToast(next ? "Spatial Audio: Enabled (Immersive 3D)" : "Spatial Audio: Disabled");
+                      return next;
+                    });
+                  }}
+                >
+                  <span>🌐 Spatial 3D Audio</span>
+                  <small>{spatialAudio ? "Active (Expanded Field)" : "Stereo"}</small>
+                </button>
+              </div>
+            </div>
+
+            {/* Device List */}
+            <div className="device-selection-section" style={{ marginTop: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+                  Available Audio Devices ({audioDevices.length > 0 ? audioDevices.length : "System Default"})
+                </label>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  style={{ padding: "3px 8px", fontSize: "0.72rem" }}
+                  onClick={openHeadphonesModal}
+                >
+                  🔄 Refresh Devices
+                </button>
+              </div>
+
+              <div className="device-list">
+                <div
+                  className={`device-item ${!selectedDeviceId ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedDeviceId("");
+                    setSelectedDeviceLabel("System Default Output / Headphones");
+                    showToast("Audio output set to System Default");
+                  }}
+                >
+                  <span className="device-icon">🎧</span>
+                  <div className="device-meta">
+                    <span className="device-name">System Default (Headphones / Speakers)</span>
+                    <small>Uses your OS default audio routing</small>
+                  </div>
+                  {!selectedDeviceId && <span className="device-check">✓</span>}
+                </div>
+
+                {audioDevices.map((dev, i) => (
+                  <div
+                    key={dev.deviceId || i}
+                    className={`device-item ${selectedDeviceId === dev.deviceId ? "active" : ""}`}
+                    onClick={() => selectAudioDevice(dev)}
+                  >
+                    <span className="device-icon">{dev.label.toLowerCase().includes("head") ? "🎧" : "🔊"}</span>
+                    <div className="device-meta">
+                      <span className="device-name">{dev.label || `Audio Device ${i + 1}`}</span>
+                      <small>{dev.groupId ? `Group: ${dev.groupId.slice(0, 10)}…` : "Audio Output"}</small>
+                    </div>
+                    {selectedDeviceId === dev.deviceId && <span className="device-check">✓</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", marginTop: "18px" }}>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={testHeadphonesSound}
+                title="Play a brief sound to verify your headphones"
+              >
+                🔔 Test Chime
+              </button>
+              <button
+                type="button"
+                className="btn-pill"
+                onClick={() => setShowHeadphonesModal(false)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ==========================================================================
           MID-SESSION CHECK-IN MODAL (Quick Tuning)

@@ -46,6 +46,9 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.deleteSession)
 	mux.HandleFunc("GET /audio/{id}", s.audio)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil || (host != "127.0.0.1" && host != "::1") {
 			jsonError(w, 403, "local host required")

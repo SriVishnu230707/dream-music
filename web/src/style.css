@@ -2347,3 +2347,195 @@ body {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   STREAMLINED TOPBAR LANGUAGE SELECTOR & AUDIO ENHANCEMENTS
+   ========================================================================== */
+
+.topbar-lang-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 25, 29, 0.9);
+  border: 1px solid var(--teal-border);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  transition: all 0.2s ease;
+}
+
+.topbar-lang-selector:hover {
+  border-color: var(--teal-bright);
+  box-shadow: 0 0 12px rgba(30, 215, 181, 0.2);
+}
+
+.topbar-lang-select {
+  background: transparent;
+  border: none;
+  color: var(--teal-bright);
+  font-size: 0.8rem;
+  font-weight: 700;
+  outline: none;
+  cursor: pointer;
+}
+
+.topbar-lang-select option {
+  background-color: #0b1518;
+  color: #ffffff;
+}
+
+.btn-icon-hero.active-shuffle {
+  color: var(--teal-bright);
+  border-color: var(--teal-bright);
+  background: rgba(30, 215, 181, 0.15);
+  box-shadow: 0 0 14px rgba(30, 215, 181, 0.3);
+}
+
+/* Headphones Modal & Device Selection */
+.headphones-modal {
+  max-width: 480px;
+}
+
+.headphones-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.headphones-icon-glow {
+  font-size: 1.8rem;
+  filter: drop-shadow(0 0 10px rgba(30, 215, 181, 0.5));
+}
+
+.headphones-status-card {
+  background: rgba(10, 20, 24, 0.95);
+  border: 1px solid var(--teal-border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.headphones-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headphones-current-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.headphones-specs {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.device-selection-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.device-item:hover {
+  background: rgba(30, 215, 181, 0.08);
+  border-color: rgba(30, 215, 181, 0.3);
+}
+
+.device-item.is-selected {
+  background: rgba(30, 215, 181, 0.14);
+  border-color: var(--teal-bright);
+}
+
+.device-icon {
+  font-size: 1.2rem;
+}
+
+.device-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device-name {
+  font-size: 0.84rem;
+  font-weight: 750;
+  color: #fff;
+}
+
+.device-meta small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.device-check {
+  color: var(--teal-bright);
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.audio-enhancements-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.enhancer-toggle {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.enhancer-toggle span {
+  font-size: 0.8rem;
+  font-weight: 750;
+  color: #fff;
+}
+
+.enhancer-toggle small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.enhancer-toggle.active {
+  background: rgba(30, 215, 181, 0.14);
+  border-color: var(--teal-bright);
+  box-shadow: 0 0 12px rgba(30, 215, 181, 0.2);
+}
+
+.enhancer-toggle.active small {
+  color: var(--teal-bright);
+  font-weight: 700;
+}
+
