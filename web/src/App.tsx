@@ -13,7 +13,7 @@ import {
   getTrackSpotifyId,
   getSpotifySearchUrl,
 } from "./data/catalog";
-import { planJourney } from "./data/plan";
+import { planJourney, buildTasteProfile, type ListeningRecord } from "./data/plan";
 
 declare global {
   interface Window {
@@ -26,7 +26,7 @@ declare global {
 export type Mood = {
   valence: number;
   arousal: number;
-  source?: "manual" | "text-model" | "user-corrected";
+  source?: "manual" | "text-model" | "user-corrected" | "catalog-estimate";
   confidence?: number;
 };
 
@@ -180,8 +180,9 @@ function generateSequenceFromCatalog(
   count: number,
   langFilter: "All" | "Tamil" | "English" = "All",
   excludedIds: ReadonlySet<string> = new Set(),
+  taste = buildTasteProfile(CATALOG_TRACKS, [], new Set<string>()),
 ): Session {
-  const queue: QueueItem[] = planJourney(CATALOG_TRACKS, start, target, count, langFilter, excludedIds)
+  const queue: QueueItem[] = planJourney(CATALOG_TRACKS, start, target, count, langFilter, excludedIds, taste)
     .map((item, i) => ({
       position: i + 1,
       ...item,
@@ -295,15 +296,11 @@ export default function App() {
   const [catalogGenre, setCatalogGenre] = useState<string>("All");
   const [visibleCount, setVisibleCount] = useState(36);
 
-  const [likedTrackIDs, setLikedTrackIDs] = useState<string[]>([
-    "tamil-1-munbe-vaa",
-    "eng-1-blinding-lights",
-    "tamil-4-arabic-kuthu-halamithi-habibo",
-    "eng-17-viva-la-vida",
-  ]);
+  const [likedTrackIDs, setLikedTrackIDs] = useState<string[]>([]);
 
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditCheckIns, setAuditCheckIns] = useState<AuditCheckIn[]>([]);
+  const [listeningRecords, setListeningRecords] = useState<ListeningRecord[]>([]);
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [toastMessage, setToastMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -320,7 +317,6 @@ export default function App() {
   const [ytBlocked, setYtBlocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"queue" | "studio" | "explore" | "audit" | "liked">("queue");
   const [showCheckInModal, setShowCheckInModal] = useState(false);
-  const [shuffleMode, setShuffleMode] = useState(false);
   const [hoverTrackIdx, setHoverTrackIdx] = useState<number | null>(null);
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -328,6 +324,25 @@ export default function App() {
   const pendingPlayRef = useRef<string | null>(null);
   const advancing = useRef(false);
   const playbackWatchdog = useRef<any>(null);
+  const listenedSecondsRef = useRef(0);
+  const lastMediaTimeRef = useRef<number | null>(null);
+  const lastSampleAtRef = useRef<number | null>(null);
+  const finishTrackRef = useRef<() => void>(() => {});
+  const continuousLoopRef = useRef(continuousLoop);
+  continuousLoopRef.current = continuousLoop;
+
+  function recordPlaybackTime(position: number) {
+    const previous = lastMediaTimeRef.current;
+    const now = performance.now();
+    if (previous !== null && Number.isFinite(position)) {
+      const delta = position - previous;
+      const elapsed = lastSampleAtRef.current === null ? 0 : (now - lastSampleAtRef.current) / 1000;
+      // Media time is capped by elapsed real time, so a seek adds no fake listening.
+      if (delta > 0 && elapsed > 0) listenedSecondsRef.current += Math.min(delta, elapsed + 0.5);
+    }
+    lastMediaTimeRef.current = position;
+    lastSampleAtRef.current = now;
+  }
 
   // Show Toast Helper
   const showToast = (msg: string) => {
@@ -397,17 +412,11 @@ export default function App() {
                 } else if (event.data === window.YT.PlayerState.PAUSED) {
                   setPlaying(false);
                 } else if (event.data === window.YT.PlayerState.ENDED) {
-                  if (continuousLoop) {
+                  if (continuousLoopRef.current) {
                     event.target.seekTo(0);
                     event.target.playVideo();
                   } else {
-                    if (shuffleMode) {
-                      void sendEvent("complete");
-                      const randIdx = Math.floor(Math.random() * session.queue.length);
-                      playQueueIndex(randIdx);
-                    } else {
-                      skipTrack("complete");
-                    }
+                    finishTrackRef.current();
                   }
                 }
               },
@@ -459,6 +468,7 @@ export default function App() {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
           const cur = ytPlayerRef.current.getCurrentTime();
           if (typeof cur === "number" && !isNaN(cur)) {
+            recordPlaybackTime(cur);
             setProgress(cur);
           }
           const dur = ytPlayerRef.current.getDuration();
@@ -520,6 +530,9 @@ export default function App() {
   // Unified Direct Playback Starter
   function startPlayback(track: Track) {
     if (!track) return;
+    listenedSecondsRef.current = 0;
+    lastMediaTimeRef.current = null;
+    lastSampleAtRef.current = null;
     currentTrackRef.current = track;
     setYtBlocked(false);
 
@@ -683,9 +696,15 @@ export default function App() {
   }
 
   // Play a specific track index in current queue
-  function playQueueIndex(idx: number) {
+  function playQueueIndex(idx: number, recordInterrupted = true) {
     const targetItem = session.queue[idx];
     if (!targetItem) return;
+    if (recordInterrupted && idx !== session.currentIndex && listenedSecondsRef.current > 0) {
+      const listenedSeconds = listenedSecondsRef.current;
+      setListeningRecords((records) => [...records, {
+        trackId: current.trackId, listenedSeconds, completed: false,
+      }]);
+    }
     const targetTrack = CATALOG_MAP[targetItem.trackId] || tracks[targetItem.trackId];
 
     setSession((s) => ({ ...s, currentIndex: idx, status: "active" }));
@@ -726,6 +745,15 @@ export default function App() {
   function skipTrack(action: "skip" | "complete" = "skip") {
     if (session.status === "completed") return;
     void sendEvent(action);
+    const listenedSeconds = listenedSecondsRef.current;
+    const updatedRecords = [...listeningRecords, {
+      trackId: current.trackId,
+      listenedSeconds,
+      completed: action === "complete",
+    }];
+    setListeningRecords(updatedRecords);
+    const nextMood = action === "complete" ? current.trackMood : sessionMood;
+    if (action === "complete") setSessionMood({ ...nextMood, source: "catalog-estimate" });
     const nextIdx = session.currentIndex + 1;
     if (nextIdx >= session.queue.length) {
       audioRef.current?.pause();
@@ -735,8 +763,27 @@ export default function App() {
       showToast("Journey finished. Choose a song or create a new path.");
       return;
     }
-    playQueueIndex(nextIdx);
+    try {
+      const locked = session.queue.slice(0, nextIdx);
+      const excluded = new Set(locked.map((item) => item.trackId));
+      const remaining = session.queue.length - nextIdx;
+      const taste = buildTasteProfile(CATALOG_TRACKS, updatedRecords, new Set(likedTrackIDs));
+      const fresh = generateSequenceFromCatalog(nextMood, target, remaining, journeyLanguage, excluded, taste);
+      setSession((s) => ({ ...s, currentIndex: nextIdx, status: "active", queue: [
+        ...locked,
+        ...fresh.queue.map((item, idx) => ({ ...item, position: nextIdx + idx + 1,
+          reason: `Adapted to listening time and taste: ${CATALOG_MAP[item.trackId]?.title || item.trackId}` })),
+      ], revision: s.revision + 1 }));
+      // playQueueIndex uses the current queue. Start the newly selected track directly.
+      const nextTrack = CATALOG_MAP[fresh.queue[0].trackId];
+      if (nextTrack) startPlayback(nextTrack);
+      return;
+    } catch (error) {
+      showToast(`Could not adapt the remaining path: ${(error as Error).message}`);
+    }
+    playQueueIndex(nextIdx, false);
   }
+  finishTrackRef.current = () => skipTrack("complete");
 
   // Send Event / Handle Playback State
   async function sendEvent(type: PlaybackEvent) {
@@ -777,6 +824,12 @@ export default function App() {
   // Direct track play from catalog
   function playCatalogTrack(t: Track) {
     const fresh = CATALOG_MAP[t.id] || t;
+    if (fresh.id !== current.trackId && listenedSecondsRef.current > 0) {
+      const listenedSeconds = listenedSecondsRef.current;
+      setListeningRecords((records) => [...records, {
+        trackId: current.trackId, listenedSeconds, completed: false,
+      }]);
+    }
     const idx = session.queue.findIndex((q) => q.trackId === fresh.id);
 
     if (idx >= 0) {
@@ -870,7 +923,8 @@ export default function App() {
     try {
       audioRef.current?.pause();
       try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
-      const data = generateSequenceFromCatalog(start, target, count, journeyLanguage);
+      const taste = buildTasteProfile(CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
+      const data = generateSequenceFromCatalog(start, target, count, journeyLanguage, new Set(), taste);
       setSession(data);
       setSessionMood({ ...start, source: "manual" });
       setAuditEvents([]);
@@ -893,7 +947,8 @@ export default function App() {
       try {
         const locked = session.queue.slice(0, session.currentIndex + 1);
         const excluded = new Set(locked.map((item) => item.trackId));
-        const fresh = generateSequenceFromCatalog(sessionMood, target, remaining, journeyLanguage, excluded);
+        const taste = buildTasteProfile(CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
+        const fresh = generateSequenceFromCatalog(sessionMood, target, remaining, journeyLanguage, excluded, taste);
         const newQueue = [
           ...locked,
           ...fresh.queue.map((item, idx) => ({
@@ -944,6 +999,8 @@ export default function App() {
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const targetTime = ratio * (duration || 180);
+    lastMediaTimeRef.current = targetTime;
+    lastSampleAtRef.current = performance.now();
     setProgress(targetTime);
 
     if (playbackMode === "full" && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
@@ -974,18 +1031,15 @@ export default function App() {
         ref={audioRef}
         preload="auto"
         loop={continuousLoop}
-        onEnded={() => {
-          if (!continuousLoop) {
-            if (shuffleMode) {
-              void sendEvent("complete");
-              const randIdx = Math.floor(Math.random() * session.queue.length);
-              playQueueIndex(randIdx);
-            } else {
-              skipTrack("complete");
-            }
-          }
+        onEnded={() => { if (!continuousLoop) skipTrack("complete"); }}
+        onTimeUpdate={(e) => {
+          recordPlaybackTime(e.currentTarget.currentTime);
+          setProgress(e.currentTarget.currentTime);
         }}
-        onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime)}
+        onSeeked={(e) => {
+          lastMediaTimeRef.current = e.currentTarget.currentTime;
+          lastSampleAtRef.current = performance.now();
+        }}
         onLoadedMetadata={(e) => {
           if (e.currentTarget.duration && !isNaN(e.currentTarget.duration) && e.currentTarget.duration > 0) {
             setDuration(e.currentTarget.duration);
@@ -2268,23 +2322,6 @@ export default function App() {
         {/* Center: Controls & Scrubber */}
         <div className="player-center">
           <div className="player-controls">
-            {/* Drift / Shuffle */}
-            <button
-              className={`control-btn ${shuffleMode ? "active" : ""}`}
-              onClick={() => {
-                setShuffleMode((v) => !v);
-                showToast(shuffleMode ? "Sequential drift active" : "Random drift active");
-              }}
-              title="Drift Mode"
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2">
-                <polyline points="16 3 21 3 21 8" />
-                <line x1="4" y1="20" x2="21" y2="3" />
-                <polyline points="21 16 21 21 16 21" />
-                <line x1="15" y1="15" x2="21" y2="21" />
-                <line x1="4" y1="4" x2="9" y2="9" />
-              </svg>
-            </button>
 
             {/* Replay */}
             <button
@@ -2513,7 +2550,7 @@ export default function App() {
               </button>
             </div>
             <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", margin: 0 }}>
-              Adjust where you are right now. The engine will smoothly re-route all upcoming tracks in the queue without interrupting current playback.
+              Adjust where you are right now. The displayed mood after a song ends is estimated from that song, not a measurement of how you feel. Your input will re-route the upcoming tracks.
             </p>
 
             <div className="control-group">
@@ -2527,7 +2564,7 @@ export default function App() {
                 max="1"
                 step="0.01"
                 value={sessionMood.valence}
-                onChange={(e) => setSessionMood({ ...sessionMood, valence: Number(e.target.value) })}
+                onChange={(e) => setSessionMood({ ...sessionMood, valence: Number(e.target.value), source: "user-corrected" })}
               />
             </div>
 
@@ -2542,7 +2579,7 @@ export default function App() {
                 max="1"
                 step="0.01"
                 value={sessionMood.arousal}
-                onChange={(e) => setSessionMood({ ...sessionMood, arousal: Number(e.target.value) })}
+                onChange={(e) => setSessionMood({ ...sessionMood, arousal: Number(e.target.value), source: "user-corrected" })}
               />
             </div>
 
