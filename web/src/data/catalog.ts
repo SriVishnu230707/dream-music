@@ -1,4 +1,6 @@
 import rawCatalog from './catalog.json';
+import { selectLongTrackCandidates } from './plan';
+export { MIN_FULL_SONG_SECONDS } from './plan';
 
 export type Track = {
   id: string;
@@ -31,6 +33,10 @@ export function getSpotifySearchUrl(track: Track): string {
 }
 
 export const CATALOG_TRACKS: Track[] = rawCatalog as Track[];
+
+// The source file repeats video IDs under invented alternate-version labels.
+// Keep one canonical entry per video and only songs listed at four minutes or more.
+export const LONG_CATALOG_TRACKS: Track[] = selectLongTrackCandidates(CATALOG_TRACKS);
 
 export const CATALOG_MAP: Record<string, Track> = Object.fromEntries(
   CATALOG_TRACKS.map((t) => [t.id, t])

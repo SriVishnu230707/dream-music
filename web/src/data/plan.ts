@@ -18,6 +18,17 @@ export type TasteProfile = { genres: ReadonlyMap<string, number>; artists: Reado
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 
+export const MIN_FULL_SONG_SECONDS = 240;
+
+export function selectLongTrackCandidates<T extends { youtubeId?: string; durationSeconds: number }>(tracks: T[]): T[] {
+  const seen = new Set<string>();
+  return tracks.filter((track) => {
+    if (!track.youtubeId || seen.has(track.youtubeId)) return false;
+    seen.add(track.youtubeId);
+    return Number.isFinite(track.durationSeconds) && track.durationSeconds >= MIN_FULL_SONG_SECONDS;
+  });
+}
+
 export function buildTasteProfile(
   tracks: PlanTrack[], records: ListeningRecord[], likedIds: ReadonlySet<string>,
 ): TasteProfile {

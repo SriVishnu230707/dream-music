@@ -8,7 +8,8 @@ import {
 } from "react";
 import {
   CATALOG_MAP,
-  CATALOG_TRACKS,
+  LONG_CATALOG_TRACKS,
+  MIN_FULL_SONG_SECONDS,
   type Track,
   getTrackSpotifyId,
   getSpotifySearchUrl,
@@ -76,34 +77,12 @@ export type Prediction = {
   reason: string | null;
 };
 
-// Initial default session with authentic Tamil & English songs
+// Initial long-song journey; the user can create a new personalized path.
 function createDefaultSession(): Session {
-  // Always resolves and ends in pure Melody (Munbe Vaa)
-  const initialTrackIds = [
-    "tamil-4-arabic-kuthu-halamithi-habibo", // High energy opening
-    "eng-1-blinding-lights",                 // Pop momentum
-    "eng-12-levitating",                     // Dance transition
-    "tamil-8-kadhale-kadhale",               // Emotional depth
-    "eng-17-viva-la-vida",                   // Symphonic glide
-    "tamil-1-munbe-vaa",                     // Pure timeless Melody destination!
-  ];
-
-  const queue: QueueItem[] = initialTrackIds.map((id, idx) => {
-    const t = CATALOG_MAP[id] || CATALOG_TRACKS[idx];
-    const isDestination = idx === initialTrackIds.length - 1;
-    return {
-      position: idx + 1,
-      trackId: t.id,
-      pathPoint: t.mood || { valence: 0.5, arousal: 0.5 },
-      trackMood: t.mood || { valence: 0.5, arousal: 0.5 },
-      reason:
-        idx === 0
-          ? `Opening energy: ${t.genre}`
-          : isDestination
-          ? `🎯 Drift Resolution: Pure Melody (${t.title} · ${t.genre})`
-          : `Drift transition ${idx + 1} (${t.language}): ${t.title}`,
-    };
-  });
+  const queue: QueueItem[] = planJourney(
+    LONG_CATALOG_TRACKS, { valence: 0.25, arousal: 0.35 },
+    { valence: 0.78, arousal: 0.35 }, 6,
+  ).map((item, idx) => ({ ...item, position: idx + 1, reason: "Long-song mood transition" }));
 
   return {
     sessionId: "default-journey",
@@ -180,9 +159,9 @@ function generateSequenceFromCatalog(
   count: number,
   langFilter: "All" | "Tamil" | "English" = "All",
   excludedIds: ReadonlySet<string> = new Set(),
-  taste = buildTasteProfile(CATALOG_TRACKS, [], new Set<string>()),
+  taste = buildTasteProfile(LONG_CATALOG_TRACKS, [], new Set<string>()),
 ): Session {
-  const queue: QueueItem[] = planJourney(CATALOG_TRACKS, start, target, count, langFilter, excludedIds, taste)
+  const queue: QueueItem[] = planJourney(LONG_CATALOG_TRACKS, start, target, count, langFilter, excludedIds, taste)
     .map((item, i) => ({
       position: i + 1,
       ...item,
@@ -312,7 +291,7 @@ export default function App() {
   const [continuousLoop, setContinuousLoop] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-  const [playbackMode, setPlaybackMode] = useState<"spotify" | "full" | "preview">("preview");
+  const [playbackMode, setPlaybackMode] = useState<"spotify" | "full">("full");
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
   const [ytBlocked, setYtBlocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"queue" | "studio" | "explore" | "audit" | "liked">("queue");
@@ -324,6 +303,7 @@ export default function App() {
   const pendingPlayRef = useRef<string | null>(null);
   const advancing = useRef(false);
   const playbackWatchdog = useRef<any>(null);
+  const durationVerifiedRef = useRef(false);
   const listenedSecondsRef = useRef(0);
   const lastMediaTimeRef = useRef<number | null>(null);
   const lastSampleAtRef = useRef<number | null>(null);
@@ -353,10 +333,14 @@ export default function App() {
   const current = session.queue[session.currentIndex] || session.queue[0];
   const currentTrack: Track =
     (current && (CATALOG_MAP[current.trackId] || tracks[current.trackId])) ||
-    CATALOG_TRACKS[0];
+    LONG_CATALOG_TRACKS[0];
 
   const currentTrackRef = useRef<Track>(currentTrack);
   currentTrackRef.current = currentTrack;
+
+  useEffect(() => {
+    setDuration(currentTrack.durationSeconds);
+  }, [currentTrack.id]);
 
   // Initialize YouTube Iframe Player
   useEffect(() => {
@@ -403,12 +387,30 @@ export default function App() {
                     clearTimeout(playbackWatchdog.current);
                     playbackWatchdog.current = null;
                   }
-                  setYtBlocked(false);
-                  setPlaying(true);
                   try {
                     const d = event.target.getDuration();
-                    if (d && d > 0) setDuration(d);
+                    if (d > 0 && d < MIN_FULL_SONG_SECONDS) {
+                      reportUnavailable("This video is shorter than four minutes.");
+                      return;
+                    }
+                    if (d >= MIN_FULL_SONG_SECONDS) {
+                      durationVerifiedRef.current = true;
+                      setDuration(d);
+                    }
                   } catch {}
+                  if (!durationVerifiedRef.current) {
+                    playbackWatchdog.current = setTimeout(() => {
+                      const actual = event.target.getDuration?.() ?? 0;
+                      if (actual < MIN_FULL_SONG_SECONDS) {
+                        reportUnavailable(actual > 0 ? "This video is shorter than four minutes." : "Could not verify this video's length.");
+                      } else {
+                        durationVerifiedRef.current = true;
+                        setDuration(actual);
+                      }
+                    }, 3000);
+                  }
+                  setYtBlocked(false);
+                  setPlaying(true);
                 } else if (event.data === window.YT.PlayerState.PAUSED) {
                   setPlaying(false);
                 } else if (event.data === window.YT.PlayerState.ENDED) {
@@ -427,12 +429,7 @@ export default function App() {
                 // 100 = Video not found/removed
                 // 2 = Invalid parameter
                 // 5 = HTML5 error
-                setYtBlocked(true);
-                const trk = currentTrackRef.current || currentTrack;
-                if (trk) {
-                  playDirectAudioFallback(trk);
-                  showToast(`Direct studio audio active for "${trk.title}"`);
-                }
+                reportUnavailable("This full video cannot play here. Choose another song.");
               },
             },
           });
@@ -472,6 +469,11 @@ export default function App() {
             setProgress(cur);
           }
           const dur = ytPlayerRef.current.getDuration();
+          if (dur > 0 && dur < MIN_FULL_SONG_SECONDS) {
+            reportUnavailable("This video is shorter than four minutes.");
+            return;
+          }
+          if (dur >= MIN_FULL_SONG_SECONDS) durationVerifiedRef.current = true;
           if (dur && dur > 0 && (!duration || Math.abs(dur - duration) > 2)) {
             setDuration(dur);
           }
@@ -498,8 +500,9 @@ export default function App() {
     }
   }, [volume, isMuted]);
 
-  // Try the catalog preview when a YouTube embed is unavailable.
-  function playDirectAudioFallback(track: Track) {
+  function reportUnavailable(message: string) {
+    pendingPlayRef.current = null;
+    durationVerifiedRef.current = false;
     setYtBlocked(true);
     if (playbackWatchdog.current) {
       clearTimeout(playbackWatchdog.current);
@@ -508,28 +511,14 @@ export default function App() {
     if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
       try { ytPlayerRef.current.pauseVideo(); } catch {}
     }
-    const el = audioRef.current;
-    if (!el || !track) return;
-    const url = track.audioUrl || CATALOG_MAP[track.id]?.audioUrl;
-    if (!url) return;
-    if (el.src !== url) {
-      el.src = url;
-    }
-    el.currentTime = 0;
-    setProgress(0);
-    setDuration(track.durationSeconds || 30);
-    el.play().then(() => {
-      setPlaying(true);
-    }).catch((err) => {
-      console.warn("Direct audio play error:", err);
-      setPlaying(false);
-      showToast("This preview is unavailable. Try another track or open its provider link.");
-    });
+    setPlaying(false);
+    showToast(message);
   }
 
   // Unified Direct Playback Starter
   function startPlayback(track: Track) {
     if (!track) return;
+    durationVerifiedRef.current = false;
     listenedSecondsRef.current = 0;
     lastMediaTimeRef.current = null;
     lastSampleAtRef.current = null;
@@ -544,8 +533,8 @@ export default function App() {
     // Spotify embeds have their own controls; the app cannot infer playback state.
     if (playbackMode === "spotify") {
       if (!getTrackSpotifyId(track)) {
-        setPlaybackMode("preview");
-        playDirectAudioFallback(track);
+        setPlaybackMode("full");
+        reportUnavailable("No verified Spotify embed. Select the YouTube full-song player.");
         return;
       }
       if (audioRef.current) audioRef.current.pause();
@@ -576,34 +565,35 @@ export default function App() {
           setProgress(0);
           setDuration(track.durationSeconds || 180);
 
-          // Watchdog: If YouTube doesn't start playing within 2.5s (due to "Watch on YouTube" error), auto-switch to direct audio
+          // Never substitute a short preview for an unavailable full song.
           playbackWatchdog.current = setTimeout(() => {
             if (ytPlayerRef.current) {
               const state = ytPlayerRef.current.getPlayerState?.();
               if (state !== 1 && state !== 3) {
-                console.warn("YouTube video blocked, auto-switching to direct audio for:", track.title);
-                playDirectAudioFallback(track);
+                reportUnavailable("Full video unavailable. Choose another song.");
               }
             }
           }, 2500);
           return;
         } catch (err) {
-          console.warn("YouTube play failed, auto-falling back:", err);
+          console.warn("YouTube play failed:", err);
         }
       } else if (yId) {
         pendingPlayRef.current = yId;
         setDuration(track.durationSeconds || 180);
         setPlaying(false);
+        playbackWatchdog.current = setTimeout(() => {
+          if (!ytPlayerRef.current) reportUnavailable("YouTube player could not load. Open the song on YouTube or choose another.");
+        }, 7000);
         return;
       }
     }
 
-    // 3. Direct audio stream
-    playDirectAudioFallback(track);
+    reportUnavailable("No full-length playback source is available for this song.");
   }
 
   // Play/Pause Toggle
-  async function togglePlay() {
+  function togglePlay() {
     if (playbackMode === "spotify") {
       showToast("Use the Spotify embed controls to play or pause.");
       return;
@@ -624,35 +614,16 @@ export default function App() {
       }
     }
 
-    const el = audioRef.current;
-    if (!el || !currentTrack) return;
-    if (playing) {
-      el.pause();
-      setPlaying(false);
+    if (!ytBlocked && currentTrack.youtubeId && !ytPlayerRef.current) {
+      startPlayback(currentTrack);
+      showToast("Loading the full video player…");
       return;
     }
-
-    const url = currentTrack.audioUrl || CATALOG_MAP[currentTrack.id]?.audioUrl;
-    if (url && el.src !== url) el.src = url;
-    try {
-      await el.play();
-      setPlaying(true);
-      void sendEvent("start");
-    } catch {
-      el.muted = false;
-      try {
-        await el.play();
-        setPlaying(true);
-        void sendEvent("start");
-      } catch {
-        setPlaying(false);
-        showToast("Click Play to start audio.");
-      }
-    }
+    showToast("Full video unavailable. Open the song on YouTube or choose another.");
   }
 
-  // Switch between Spotify, Full Song, and 30s Snippet
-  function switchPlaybackMode(mode: "spotify" | "full" | "preview") {
+  // Switch between verified full-length providers only.
+  function switchPlaybackMode(mode: "spotify" | "full") {
     if (mode === "spotify" && !getTrackSpotifyId(currentTrack)) {
       showToast("No verified Spotify embed for this track. Open Spotify search instead.");
       return;
@@ -666,6 +637,7 @@ export default function App() {
       setPlaying(false);
       showToast("Use the embedded Spotify controls to play this track.");
     } else if (mode === "full") {
+      setYtBlocked(false);
       if (audioRef.current) audioRef.current.pause();
       const yId = currentTrack?.youtubeId || CATALOG_MAP[currentTrack?.id]?.youtubeId;
       if (yId && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
@@ -676,22 +648,7 @@ export default function App() {
         ytPlayerRef.current.playVideo();
         setPlaying(false);
       }
-      showToast("YouTube video player selected. Playback depends on video availability.");
-    } else {
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
-        ytPlayerRef.current.pauseVideo();
-      }
-      const el = audioRef.current;
-      if (el && currentTrack) {
-        const url = currentTrack.audioUrl || CATALOG_MAP[currentTrack.id]?.audioUrl;
-        if (url && el.src !== url) el.src = url;
-        el.currentTime = Math.min(progress, 28);
-        el.play().then(() => setPlaying(true)).catch(() => {
-          setPlaying(false);
-          showToast("Preview unavailable. Try the YouTube player or another track.");
-        });
-      }
-      showToast("⚡ 30-second preview mode active");
+      showToast("Checking full video availability and duration.");
     }
   }
 
@@ -718,7 +675,7 @@ export default function App() {
 
   // Replay
   function replayTrack() {
-    if (playbackMode === "full" && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+    if (playbackMode === "full" && !ytBlocked && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
       try {
         ytPlayerRef.current.seekTo(0, true);
         ytPlayerRef.current.playVideo();
@@ -730,15 +687,7 @@ export default function App() {
       } catch {}
     }
 
-    const el = audioRef.current;
-    if (!el || !currentTrack) return;
-    el.currentTime = 0;
-    setProgress(0);
-    el.play().then(() => {
-      setPlaying(true);
-      void sendEvent("replay");
-      showToast(`Replaying ${currentTrack.title}`);
-    }).catch(() => {});
+    showToast("Full video unavailable. Choose another song.");
   }
 
   // Skip
@@ -767,7 +716,7 @@ export default function App() {
       const locked = session.queue.slice(0, nextIdx);
       const excluded = new Set(locked.map((item) => item.trackId));
       const remaining = session.queue.length - nextIdx;
-      const taste = buildTasteProfile(CATALOG_TRACKS, updatedRecords, new Set(likedTrackIDs));
+      const taste = buildTasteProfile(LONG_CATALOG_TRACKS, updatedRecords, new Set(likedTrackIDs));
       const fresh = generateSequenceFromCatalog(nextMood, target, remaining, journeyLanguage, excluded, taste);
       setSession((s) => ({ ...s, currentIndex: nextIdx, status: "active", queue: [
         ...locked,
@@ -917,13 +866,13 @@ export default function App() {
     showToast(`Target set to ${presetName} (V: ${(presetV * 100).toFixed(0)}%, A: ${(presetA * 100).toFixed(0)}%)`);
   }
 
-  // Create New Journey Session across 1000 songs
+  // Create a journey from distinct long-song candidates.
   function createJourney() {
     setBusy(true);
     try {
       audioRef.current?.pause();
       try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
-      const taste = buildTasteProfile(CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
+      const taste = buildTasteProfile(LONG_CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
       const data = generateSequenceFromCatalog(start, target, count, journeyLanguage, new Set(), taste);
       setSession(data);
       setSessionMood({ ...start, source: "manual" });
@@ -947,7 +896,7 @@ export default function App() {
       try {
         const locked = session.queue.slice(0, session.currentIndex + 1);
         const excluded = new Set(locked.map((item) => item.trackId));
-        const taste = buildTasteProfile(CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
+        const taste = buildTasteProfile(LONG_CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
         const fresh = generateSequenceFromCatalog(sessionMood, target, remaining, journeyLanguage, excluded, taste);
         const newQueue = [
           ...locked,
@@ -978,7 +927,7 @@ export default function App() {
   // Filtered Catalog tracks based on search, language, and genre
   const filteredCatalog = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return CATALOG_TRACKS.filter((t) => {
+    return LONG_CATALOG_TRACKS.filter((t) => {
       // Language filter
       if (catalogLanguage !== "All" && t.language !== catalogLanguage) return false;
       // Genre filter
@@ -1059,7 +1008,7 @@ export default function App() {
 
       {/* Docked Full Song Video & Audio Canvas */}
       <div
-        className={`docked-player-widget ${miniPlayerCollapsed ? "is-collapsed" : ""} ${playbackMode === "spotify" ? "is-spotify" : ""} ${playbackMode === "preview" ? "is-hidden" : ""}`}
+        className={`docked-player-widget ${miniPlayerCollapsed ? "is-collapsed" : ""} ${playbackMode === "spotify" ? "is-spotify" : ""}`}
       >
         <div className="mini-player-bar">
           <div className="mini-player-badge">
@@ -1071,7 +1020,7 @@ export default function App() {
               {playbackMode === "spotify"
                 ? "Spotify Player (Full)"
                 : ytBlocked
-                ? "Direct Audio"
+                ? "Full video unavailable"
                 : "YouTube HD"}
             </span>
           </div>
@@ -1144,7 +1093,7 @@ export default function App() {
                       <span className="eq-bar bar-5" />
                     </div>
                     <span className="visualizer-label">{currentTrack.title}</span>
-                    <small className="visualizer-sub">Direct Studio Audio · No Video Block</small>
+                    <small className="visualizer-sub">Choose another full-length song</small>
                   </div>
                 </div>
               )}
@@ -1153,13 +1102,13 @@ export default function App() {
         </div>
       </div>
 
-      {/* Official HD Music Video Modal */}
+      {/* Linked YouTube video modal */}
       {showVideoModal && (
         <div className="video-canvas-overlay" onClick={() => setShowVideoModal(false)}>
           <div className="video-canvas-modal" onClick={(e) => e.stopPropagation()}>
             <div className="canvas-header">
               <div className="canvas-title">
-                <span>Official HD Music Video</span>
+                <span>Linked YouTube Video</span>
                 <small>{currentTrack.title} · {currentTrack.artist}</small>
               </div>
               <button
@@ -1251,7 +1200,7 @@ export default function App() {
           </div>
           <div className="brand-title">
             <h1>mood<span>drift</span></h1>
-            <span className="brand-badge">1,000 Real Songs · Tamil & English</span>
+            <span className="brand-badge">{LONG_CATALOG_TRACKS.length} distinct long-song candidates · Tamil & English</span>
           </div>
         </div>
 
@@ -1276,7 +1225,7 @@ export default function App() {
               <circle cx="12" cy="12" r="10" />
               <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
             </svg>
-            <span>Explore Catalog (1,000)</span>
+            <span>Explore Long Songs ({LONG_CATALOG_TRACKS.length})</span>
           </button>
 
           <button
@@ -1360,7 +1309,7 @@ export default function App() {
                 setActiveTab("explore");
               }}
             >
-              Tamil (500)
+              Tamil ({LONG_CATALOG_TRACKS.filter((track) => track.language === "Tamil").length})
             </span>
             <span
               className="lib-filter-pill"
@@ -1369,7 +1318,7 @@ export default function App() {
                 setActiveTab("explore");
               }}
             >
-              English (500)
+              English ({LONG_CATALOG_TRACKS.filter((track) => track.language === "English").length})
             </span>
           </div>
 
@@ -1431,7 +1380,7 @@ export default function App() {
               </div>
               <div className="library-item-meta">
                 <span className="library-item-title">Tamil Melodies & Kuthu</span>
-                <span className="library-item-subtitle">500 Tracks · Rahman, Anirudh & more</span>
+                <span className="library-item-subtitle">{LONG_CATALOG_TRACKS.filter((track) => track.language === "Tamil").length} long-song candidates</span>
               </div>
             </div>
 
@@ -1448,7 +1397,7 @@ export default function App() {
               </div>
               <div className="library-item-meta">
                 <span className="library-item-title">Global English Hits</span>
-                <span className="library-item-subtitle">500 Tracks · The Weeknd, Taylor & more</span>
+                <span className="library-item-subtitle">{LONG_CATALOG_TRACKS.filter((track) => track.language === "English").length} long-song candidates</span>
               </div>
             </div>
           </div>
@@ -1459,7 +1408,7 @@ export default function App() {
           <div className="user-avatar">{userId.charAt(0).toUpperCase()}</div>
           <div className="user-meta">
             <span className="user-name">{userId}</span>
-            <span className="user-tag">Official Audio Enabled</span>
+            <span className="user-tag">Full videos checked on play</span>
           </div>
         </div>
       </aside>
@@ -1529,7 +1478,7 @@ export default function App() {
 
                 <div className="hero-info">
                   <span className="hero-type">
-                    OFFICIAL TRACK PREVIEW · {currentTrack?.language?.toUpperCase()}
+                    LONG-SONG CANDIDATE · {currentTrack?.language?.toUpperCase()}
                   </span>
                   <h1 className="hero-title">{currentTrack?.title || "Listening Journey"}</h1>
                   <p className="hero-desc">
@@ -1541,9 +1490,9 @@ export default function App() {
                   <div className="hero-meta">
                     <strong>{userId}</strong>
                     <span className="hero-meta-dot" />
-                    <span>{session.queue.length} songs · ~{session.queue.length * 3} min</span>
+                    <span>{session.queue.length} songs · ~{Math.round(session.queue.reduce((total, item) => total + (CATALOG_MAP[item.trackId]?.durationSeconds ?? 0), 0) / 60)} listed min</span>
                     <span className="hero-meta-dot" />
-                    <span>Authentic Master Recording</span>
+                    <span>Video length checked on play</span>
                   </div>
                 </div>
               </section>
@@ -1688,13 +1637,13 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: EXPLORE CATALOG (1,000 SONGS: 500 TAMIL & 500 ENGLISH) */}
+          {/* TAB 2: EXPLORE DISTINCT LONG-SONG CANDIDATES */}
           {activeTab === "explore" && (
             <div className="catalog-section">
               <div className="catalog-header">
-                <h2>Browse 1,000 Songs (Tamil & English)</h2>
+                <h2>Browse Long Songs (Tamil & English)</h2>
                 <span style={{ fontSize: "0.85rem", color: "var(--teal-bright)" }}>
-                  Showing {filteredCatalog.length} of 1,000 songs
+                  Showing {filteredCatalog.length} of {LONG_CATALOG_TRACKS.length} candidates · listed at least 4 minutes; actual video duration checked on play
                 </span>
               </div>
 
@@ -1725,7 +1674,7 @@ export default function App() {
                       setVisibleCount(36);
                     }}
                   >
-                    All Languages (1,000)
+                    All Languages ({LONG_CATALOG_TRACKS.length})
                   </button>
                   <button
                     className={`lang-pill ${catalogLanguage === "Tamil" ? "active" : ""}`}
@@ -1928,7 +1877,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 4: MOOD STUDIO (Interactive 2D Map & 1000 Songs Journey Planner) */}
+          {/* TAB 4: MOOD STUDIO */}
           {activeTab === "studio" && (
             <div className="studio-grid">
               {/* Left Column: Interactive 2D Coordinate Plane */}
@@ -2084,7 +2033,7 @@ export default function App() {
                     value={journeyLanguage}
                     onChange={(e) => setJourneyLanguage(e.target.value as "All" | "Tamil" | "English")}
                   >
-                    <option value="All">Both Tamil & English (1,000 Songs)</option>
+                    <option value="All">Both Tamil & English ({LONG_CATALOG_TRACKS.length} candidates)</option>
                     <option value="Tamil">Tamil Songs Only (500 Songs)</option>
                     <option value="English">English Songs Only (500 Songs)</option>
                   </select>
@@ -2407,7 +2356,7 @@ export default function App() {
 
         {/* Right: Mode Toggle, Canvas Video, Volume & Mood Coordinates */}
         <div className="player-right">
-          {/* Engine Selector: Spotify (Full) vs YouTube (Full) vs 30s Snippet */}
+          {/* Full-length playback only */}
           <div className="playback-mode-toggle">
             <button
               className={`mode-pill spotify-pill ${playbackMode === "spotify" ? "active" : ""}`}
@@ -2424,13 +2373,6 @@ export default function App() {
             >
               🎵 YouTube
             </button>
-            <button
-              className={`mode-pill ${playbackMode === "preview" ? "active" : ""}`}
-              onClick={() => switchPlaybackMode("preview")}
-              title="Play 30-second quick snippet"
-            >
-              ⚡ 30s
-            </button>
           </div>
 
           {/* Open in Spotify App Link */}
@@ -2445,6 +2387,18 @@ export default function App() {
               <path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10s10-4.476 10-10c0-5.523-4.477-10-10-10zm4.586 14.424a.623.623 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.624.624 0 0 1-.277-1.217c3.81-.871 7.078-.496 9.712 1.116a.625.625 0 0 1 .207.858zm1.225-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 1 1-.453-1.493c3.632-1.102 8.147-.568 11.233 1.33a.78.78 0 0 1 .257 1.072zm.105-2.835C14.692 8.95 8.085 8.73 4.708 9.756a.936.936 0 1 1-.545-1.791c3.955-1.2 11.258-.95 15.084 1.32a.936.936 0 1 1-1.33 1.581z"/>
             </svg>
           </a>
+          {currentTrack.youtubeId && (
+            <a
+              href={`https://www.youtube.com/watch?v=${currentTrack.youtubeId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="control-btn"
+              title="Open this video on YouTube when embedded playback is unavailable"
+              aria-label="Open current song on YouTube"
+            >
+              ▶ YouTube
+            </a>
+          )}
 
           {/* Continuous Run Mode Toggle */}
           <button
@@ -2466,7 +2420,7 @@ export default function App() {
             <button
               className={`control-btn ${showVideoModal ? "active" : ""}`}
               onClick={() => setShowVideoModal((v) => !v)}
-              title="Watch Official HD Music Video"
+              title="Open linked YouTube video"
             >
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="2" y="3" width="20" height="14" rx="2" />

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planJourney, buildTasteProfile } from '../src/data/plan.ts';
+import { planJourney, buildTasteProfile, selectLongTrackCandidates } from '../src/data/plan.ts';
 
 const tracks = [
   { id: 'low', genre: 'ambient', artist: 'a', language: 'English', mood: { valence: 0.1, arousal: 0.1 }, audioUrl: '/low.wav' },
@@ -38,4 +38,13 @@ test('longer listening and likes favor taste among equal-mood tracks', () => {
   ], new Set(['jazz']));
   const queue = planJourney(options, { valence: 0.5, arousal: 0.5 }, { valence: 0.5, arousal: 0.5 }, 1, 'All', new Set(), taste);
   assert.equal(queue[0].trackId, 'jazz');
+});
+test('long-song candidates exclude previews and repeated video IDs', () => {
+  const candidates = selectLongTrackCandidates([
+    { id: 'short', youtubeId: 'a', durationSeconds: 179 },
+    { id: 'long', youtubeId: 'b', durationSeconds: 260 },
+    { id: 'fake-version', youtubeId: 'b', durationSeconds: 310 },
+    { id: 'no-video', durationSeconds: 300 },
+  ]);
+  assert.deepEqual(candidates.map((track) => track.id), ['long']);
 });
