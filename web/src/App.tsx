@@ -291,7 +291,7 @@ export default function App() {
   const [continuousLoop, setContinuousLoop] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-  const [playbackMode, setPlaybackMode] = useState<"audio" | "full" | "spotify">("audio");
+  const [playbackMode, setPlaybackMode] = useState<"full" | "spotify">("full");
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
   const [ytBlocked, setYtBlocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"queue" | "studio" | "explore" | "audit" | "liked">("queue");
@@ -361,7 +361,6 @@ export default function App() {
           ytPlayerRef.current = new window.YT.Player("yt-player-target", {
             height: "100%",
             width: "100%",
-            videoId: currentTrack?.youtubeId || "4NRXx6U8ABQ",
             playerVars: {
               autoplay: 0,
               controls: 0,
@@ -380,13 +379,21 @@ export default function App() {
                   event.target.setVolume(isMuted ? 0 : Math.round(volume * 100));
                 } catch {}
                 if (pendingPlayRef.current) {
+                  const requestedVideo = pendingPlayRef.current;
                   event.target.loadVideoById({
-                    videoId: pendingPlayRef.current,
+                    videoId: requestedVideo,
                     startSeconds: 0,
                   });
                   event.target.playVideo();
                   setPlaying(false);
                   pendingPlayRef.current = null;
+                  if (playbackWatchdog.current) clearTimeout(playbackWatchdog.current);
+                  playbackWatchdog.current = setTimeout(() => {
+                    const state = event.target.getPlayerState?.();
+                    if (state !== window.YT?.PlayerState?.PLAYING && state !== window.YT?.PlayerState?.BUFFERING) {
+                      reportUnavailable("The embedded video did not start. Open it on YouTube or choose another song.");
+                    }
+                  }, 6500);
                 }
               },
               onStateChange: (event: any) => {
@@ -398,11 +405,29 @@ export default function App() {
                   }
                   try {
                     const d = event.target.getDuration();
-                    if (d > 0) {
+                    if (d > 0 && d < MIN_FULL_SONG_SECONDS) {
+                      reportUnavailable("This linked video is shorter than four minutes.");
+                      return;
+                    }
+                    if (d >= MIN_FULL_SONG_SECONDS) {
                       durationVerifiedRef.current = true;
                       setDuration(d);
                     }
                   } catch {}
+                  if (!durationVerifiedRef.current) {
+                    playbackWatchdog.current = setTimeout(() => {
+                      const actual = event.target.getDuration?.() ?? 0;
+                      if (actual < MIN_FULL_SONG_SECONDS) {
+                        reportUnavailable(actual > 0 ? "This linked video is shorter than four minutes." : "Could not verify this video's length.");
+                      } else {
+                        durationVerifiedRef.current = true;
+                        setDuration(actual);
+                        setYtBlocked(false);
+                        setPlaying(true);
+                      }
+                    }, 3000);
+                    return;
+                  }
                   setYtBlocked(false);
                   setPlaying(true);
                 } else if (event.data === window.YT.PlayerState.PAUSED) {
@@ -419,14 +444,7 @@ export default function App() {
               onError: (err: any) => {
                 const code = err?.data;
                 console.warn("YouTube player error/restriction:", code);
-                // Fallback to direct audio stream if YouTube video is restricted or fails
-                if (currentTrackRef.current?.audioUrl && audioRef.current) {
-                  audioRef.current.src = currentTrackRef.current.audioUrl;
-                  audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-                  showToast("Playing direct audio stream (video embed restricted)");
-                } else {
-                  reportUnavailable("This video cannot play here. Choose another song.");
-                }
+                reportUnavailable("This video cannot play here. Open it on YouTube or choose another song.");
               },
             },
           });
@@ -466,6 +484,11 @@ export default function App() {
             setProgress(cur);
           }
           const dur = ytPlayerRef.current.getDuration();
+          if (dur > 0 && dur < MIN_FULL_SONG_SECONDS) {
+            reportUnavailable("This linked video is shorter than four minutes.");
+            return;
+          }
+          if (dur >= MIN_FULL_SONG_SECONDS) durationVerifiedRef.current = true;
           if (dur && dur > 0 && (!duration || Math.abs(dur - duration) > 2)) {
             setDuration(dur);
           }
@@ -503,244 +526,99 @@ export default function App() {
     if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
       try { ytPlayerRef.current.pauseVideo(); } catch {}
     }
-    // Seamless fallback to direct audio stream
-    if (currentTrackRef.current?.audioUrl && audioRef.current) {
-      audioRef.current.src = currentTrackRef.current.audioUrl;
-      audioRef.current.play().then(() => {
-        setPlaying(true);
-        showToast("Playing direct audio stream");
-      }).catch(() => {
-        setPlaying(false);
-        showToast(message);
-      });
-      return;
-    }
     setPlaying(false);
     showToast(message);
   }
 
-  // Unified Direct Playback Starter
-  function startPlayback(track: Track) {
-    if (!track) return;
+  // Start only a full-length video. The player confirms both playback and duration.
+  function startFullVideo(track: Track, startSeconds = 0) {
+    const videoId = track.youtubeId;
+    if (!videoId) {
+      reportUnavailable("No linked full video is available for this song.");
+      return;
+    }
+    currentTrackRef.current = track;
+    pendingPlayRef.current = null;
     durationVerifiedRef.current = false;
+    setYtBlocked(false);
+    setPlaying(false);
+    if (playbackWatchdog.current) clearTimeout(playbackWatchdog.current);
+
+    const player = ytPlayerRef.current;
+    if (player && typeof player.loadVideoById === "function") {
+      try {
+        player.loadVideoById({ videoId, startSeconds });
+        player.playVideo();
+        playbackWatchdog.current = setTimeout(() => {
+          const state = player.getPlayerState?.();
+          if (state !== window.YT?.PlayerState?.PLAYING && state !== window.YT?.PlayerState?.BUFFERING) {
+            reportUnavailable("The embedded video did not start. Open it on YouTube or choose another song.");
+          }
+        }, 6500);
+        return;
+      } catch (error) {
+        console.warn("YouTube startup failed:", error);
+      }
+    }
+
+    pendingPlayRef.current = videoId;
+    playbackWatchdog.current = setTimeout(() => {
+      if (pendingPlayRef.current === videoId) {
+        reportUnavailable("YouTube's player could not load. Open the song on YouTube.");
+      }
+    }, 8000);
+  }
+
+  function startPlayback(track: Track) {
     listenedSecondsRef.current = 0;
     lastMediaTimeRef.current = null;
     lastSampleAtRef.current = null;
-    currentTrackRef.current = track;
-    setYtBlocked(false);
-
-    if (playbackWatchdog.current) {
-      clearTimeout(playbackWatchdog.current);
-      playbackWatchdog.current = null;
-    }
-
-    // Spotify embeds have their own controls; the app cannot infer playback state.
-    if (playbackMode === "spotify") {
-      if (!getTrackSpotifyId(track)) {
-        setPlaybackMode("audio");
-        showToast("No verified Spotify embed. Switched to Direct Audio.");
-      } else {
-        if (audioRef.current) audioRef.current.pause();
-        if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
-          try { ytPlayerRef.current.pauseVideo(); } catch {}
-        }
-        setPlaying(false);
-        setProgress(0);
-        setDuration(track.durationSeconds || 210);
-        showToast(`Use the Spotify embed controls for "${track.title}".`);
-        return;
-      }
-    }
-
-    // 1. Direct High-Fidelity Audio Mode
-    if (playbackMode === "audio") {
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
-        try { ytPlayerRef.current.pauseVideo(); } catch {}
-      }
-      const el = audioRef.current;
-      if (el && track.audioUrl) {
-        el.src = track.audioUrl;
-        el.currentTime = 0;
-        setProgress(0);
-        setDuration(track.durationSeconds || 180);
-        el.play()
-          .then(() => {
-            setPlaying(true);
-          })
-          .catch((err) => {
-            console.warn("Audio play failed:", err);
-            setPlaying(false);
-          });
-        return;
-      }
-    }
-
-    // 2. YouTube Full HD Engine
-    if (playbackMode === "full") {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      const yId = track.youtubeId || CATALOG_MAP[track.id]?.youtubeId;
-      if (yId && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
-        try {
-          ytPlayerRef.current.loadVideoById({
-            videoId: yId,
-            startSeconds: 0,
-          });
-          ytPlayerRef.current.playVideo();
-          setPlaying(true);
-          setProgress(0);
-          setDuration(track.durationSeconds || 180);
-
-          playbackWatchdog.current = setTimeout(() => {
-            if (ytPlayerRef.current) {
-              const state = ytPlayerRef.current.getPlayerState?.();
-              if (state !== 1 && state !== 3) {
-                if (track.audioUrl && audioRef.current) {
-                  audioRef.current.src = track.audioUrl;
-                  audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-                  showToast("Playing direct audio stream (video stream delayed)");
-                }
-              }
-            }
-          }, 4000);
-          return;
-        } catch (err) {
-          console.warn("YouTube play failed:", err);
-        }
-      } else if (yId) {
-        pendingPlayRef.current = yId;
-        setDuration(track.durationSeconds || 180);
-        setPlaying(true);
-        playbackWatchdog.current = setTimeout(() => {
-          if (!ytPlayerRef.current && track.audioUrl && audioRef.current) {
-            audioRef.current.src = track.audioUrl;
-            audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-            showToast("Playing direct audio stream");
-          }
-        }, 3500);
-        return;
-      }
-      // If YouTube has no yId or failed, fallback to audio stream
-      if (track.audioUrl && audioRef.current) {
-        audioRef.current.src = track.audioUrl;
-        audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-        showToast("Playing direct audio stream");
-        return;
-      }
-    }
-
-    // Final fallback: native audio
-    if (track.audioUrl && audioRef.current) {
-      audioRef.current.src = track.audioUrl;
-      audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
+    audioRef.current?.pause();
+    setProgress(0);
+    setDuration(track.durationSeconds);
+    if (playbackMode === "spotify" && getTrackSpotifyId(track)) {
+      try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
+      setPlaying(false);
+      showToast("Use the Spotify embed controls to play this song.");
       return;
     }
-
-    reportUnavailable("No playback source is available for this song.");
+    startFullVideo(track);
   }
 
-  // Play/Pause Toggle
   function togglePlay() {
     if (playbackMode === "spotify") {
       showToast("Use the Spotify embed controls to play or pause.");
       return;
     }
-
-    if (playbackMode === "audio") {
-      const el = audioRef.current;
-      if (el) {
-        if (playing) {
-          el.pause();
-          setPlaying(false);
-        } else {
-          if (!el.src || el.src === "" || !el.src.includes(currentTrack.audioUrl.slice(-15))) {
-            el.src = currentTrack.audioUrl;
-          }
-          el.play()
-            .then(() => setPlaying(true))
-            .catch((err) => {
-              console.warn("Audio togglePlay error:", err);
-              setPlaying(false);
-            });
-        }
-      }
+    if (playing) {
+      try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
+      setPlaying(false);
       return;
     }
-
-    if (!ytBlocked && playbackMode === "full" && ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-      try {
-        if (playing) {
-          ytPlayerRef.current.pauseVideo();
-          setPlaying(false);
-        } else {
-          ytPlayerRef.current.playVideo();
-          setPlaying(true);
-        }
-        return;
-      } catch (err) {
-        console.warn("YT togglePlay error:", err);
-      }
-    }
-
-    // Fallback: If YouTube is blocked or player not ready, toggle HTML5 audio
-    const el = audioRef.current;
-    if (el) {
-      if (playing) {
-        el.pause();
-        setPlaying(false);
-      } else if (currentTrack.audioUrl) {
-        if (!el.src || el.src === "" || !el.src.includes(currentTrack.audioUrl.slice(-15))) {
-          el.src = currentTrack.audioUrl;
-        }
-        el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-      }
+    if (ytBlocked || !ytPlayerRef.current || progress === 0) {
+      startFullVideo(currentTrack);
       return;
     }
-
-    showToast("Playback source unavailable. Choose another song.");
+    try {
+      ytPlayerRef.current.playVideo();
+    } catch {
+      startFullVideo(currentTrack);
+    }
   }
 
-  // Switch between verified providers
-  function switchPlaybackMode(mode: "audio" | "spotify" | "full") {
-    if (mode === "spotify" && !getTrackSpotifyId(currentTrack)) {
-      showToast("No verified Spotify embed for this track. Open Spotify search instead.");
+  function switchPlaybackMode(mode: "spotify" | "full") {
+    if (mode === "spotify") {
+      if (!getTrackSpotifyId(currentTrack)) {
+        showToast("No verified Spotify embed is available for this song.");
+        return;
+      }
+      try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
+      setPlaybackMode("spotify");
+      setPlaying(false);
       return;
     }
-    setPlaybackMode(mode);
-    if (mode === "audio") {
-      setYtBlocked(false);
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
-        try { ytPlayerRef.current.pauseVideo(); } catch {}
-      }
-      const el = audioRef.current;
-      if (el && currentTrack.audioUrl) {
-        el.src = currentTrack.audioUrl;
-        el.currentTime = Math.floor(progress);
-        el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-      }
-      showToast("Switched to Direct Audio Stream");
-    } else if (mode === "spotify") {
-      if (audioRef.current) audioRef.current.pause();
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
-        try { ytPlayerRef.current.pauseVideo(); } catch {}
-      }
-      setPlaying(false);
-      showToast("Use the embedded Spotify controls to play this track.");
-    } else if (mode === "full") {
-      setYtBlocked(false);
-      if (audioRef.current) audioRef.current.pause();
-      const yId = currentTrack?.youtubeId || CATALOG_MAP[currentTrack?.id]?.youtubeId;
-      if (yId && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
-        ytPlayerRef.current.loadVideoById({
-          videoId: yId,
-          startSeconds: Math.floor(progress),
-        });
-        ytPlayerRef.current.playVideo();
-        setPlaying(true);
-      }
-      showToast("Switched to YouTube Player");
-    }
+    setPlaybackMode("full");
+    startFullVideo(currentTrack);
   }
 
   // Play a specific track index in current queue
@@ -765,36 +643,17 @@ export default function App() {
 
   // Replay
   function replayTrack() {
-    if (playbackMode === "audio") {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-        setProgress(0);
-        void sendEvent("replay");
-        showToast(`Replaying ${currentTrack.title}`);
-        return;
-      }
-    }
     if (playbackMode === "full" && !ytBlocked && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
       try {
         ytPlayerRef.current.seekTo(0, true);
         ytPlayerRef.current.playVideo();
-        setPlaying(true);
         setProgress(0);
         void sendEvent("replay");
         showToast(`Replaying ${currentTrack.title}`);
         return;
       } catch {}
     }
-    if (audioRef.current && currentTrack.audioUrl) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-      setProgress(0);
-      void sendEvent("replay");
-      showToast(`Replaying ${currentTrack.title}`);
-      return;
-    }
-    showToast("Replay unavailable for this song.");
+    showToast("Full video unavailable. Open the song on YouTube or choose another.");
   }
 
   // Skip
@@ -1147,10 +1006,7 @@ export default function App() {
       } catch {}
     }
 
-    const el = audioRef.current;
-    if (el) {
-      el.currentTime = targetTime;
-    }
+    showToast("Seeking is available after the embedded video starts.");
   }
 
   // Format seconds to mm:ss
@@ -1163,44 +1019,8 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Persistent HTML5 Audio Tag */}
-      <audio
-        ref={audioRef}
-        src={currentTrack.audioUrl}
-        preload="auto"
-        loop={continuousLoop}
-        onEnded={() => { if (!continuousLoop) skipTrack("complete"); }}
-        onPlay={() => setPlaying(true)}
-        onPause={() => {
-          if (playbackMode === "audio") setPlaying(false);
-        }}
-        onTimeUpdate={(e) => {
-          recordPlaybackTime(e.currentTarget.currentTime);
-          setProgress(e.currentTarget.currentTime);
-        }}
-        onSeeked={(e) => {
-          lastMediaTimeRef.current = e.currentTarget.currentTime;
-          lastSampleAtRef.current = performance.now();
-        }}
-        onLoadedMetadata={(e) => {
-          if (e.currentTarget.duration && !isNaN(e.currentTarget.duration) && e.currentTarget.duration > 0) {
-            setDuration(e.currentTarget.duration);
-          }
-        }}
-        onDurationChange={(e) => {
-          if (e.currentTarget.duration && !isNaN(e.currentTarget.duration) && e.currentTarget.duration > 0) {
-            setDuration(e.currentTarget.duration);
-          }
-        }}
-        onError={(e) => {
-          console.warn("Audio element error:", e);
-          if (playbackMode === "audio") {
-            setPlaying(false);
-            showToast("Audio preview unavailable. Trying YouTube...");
-            switchPlaybackMode("full");
-          }
-        }}
-      />
+      {/* Kept without a source for browser output-device support; previews are not full songs. */}
+      <audio ref={audioRef} preload="none" />
 
       {/* Docked Full Song Video & Audio Canvas */}
       <div
@@ -1215,10 +1035,8 @@ export default function App() {
             <span>
               {playbackMode === "spotify"
                 ? "Spotify Player"
-                : playbackMode === "audio"
-                ? "Direct Audio Stream"
                 : ytBlocked
-                ? "Audio Fallback"
+                ? "Full video unavailable"
                 : "YouTube HD"}
             </span>
           </div>
@@ -1253,6 +1071,10 @@ export default function App() {
           </div>
         </div>
         <div className="mini-player-viewport">
+          <div
+            id="yt-player-target"
+            style={{ width: "100%", height: "100%", display: playbackMode === "full" && !ytBlocked ? "block" : "none" }}
+          />
           {playbackMode === "spotify" && getTrackSpotifyId(currentTrack) ? (
             <iframe
               key={currentTrack.id}
@@ -1265,7 +1087,7 @@ export default function App() {
               style={{ border: "none", background: "#0b1518" }}
               title={`Spotify Player - ${currentTrack.title}`}
             />
-          ) : playbackMode === "audio" || ytBlocked ? (
+          ) : ytBlocked ? (
             <div className="direct-audio-visualizer">
               <img
                 src={currentTrack.artworkUrl}
@@ -1281,18 +1103,10 @@ export default function App() {
                   <span className="eq-bar bar-5" />
                 </div>
                 <span className="visualizer-label">{currentTrack.title}</span>
-                <small className="visualizer-sub">{currentTrack.artist}</small>
+                <small className="visualizer-sub">Open the linked video on YouTube or choose another song</small>
               </div>
             </div>
-          ) : (
-            <div
-              id="yt-player-target"
-              style={{
-                width: "100%",
-                height: "100%",
-              }}
-            />
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -2592,13 +2406,6 @@ export default function App() {
         <div className="player-right">
           {/* Full-length playback only */}
           <div className="playback-mode-toggle">
-            <button
-              className={`mode-pill ${playbackMode === "audio" ? "active" : ""}`}
-              onClick={() => switchPlaybackMode("audio")}
-              title="Play direct audio stream"
-            >
-              🎧 Audio
-            </button>
             <button
               className={`mode-pill ${playbackMode === "full" ? "active" : ""}`}
               onClick={() => switchPlaybackMode("full")}
