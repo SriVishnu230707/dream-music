@@ -2015,8 +2015,8 @@ body {
   position: fixed;
   bottom: calc(var(--player-height) + 14px);
   right: 20px;
-  width: 280px;
-  height: 195px;
+  width: min(340px, calc(100vw - 24px));
+  height: 260px;
   background: rgba(8, 17, 21, 0.95);
   border: 1px solid rgba(30, 215, 181, 0.35);
   border-radius: var(--radius-md);

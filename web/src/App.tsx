@@ -308,6 +308,7 @@ export default function App() {
   const [bassBoost, setBassBoost] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
+  const ytHostRef = useRef<HTMLDivElement>(null);
   const ytPlayerRef = useRef<any>(null);
   const pendingPlayRef = useRef<string | null>(null);
   const advancing = useRef(false);
@@ -317,6 +318,10 @@ export default function App() {
   const lastMediaTimeRef = useRef<number | null>(null);
   const lastSampleAtRef = useRef<number | null>(null);
   const finishTrackRef = useRef<() => void>(() => {});
+  const sourceFailureRef = useRef<(message: string) => void>(() => {});
+  const rejectedTrackIdsRef = useRef(new Set<string>());
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const continuousLoopRef = useRef(continuousLoop);
   continuousLoopRef.current = continuousLoop;
 
@@ -354,11 +359,18 @@ export default function App() {
   // Initialize YouTube Iframe Player
   useEffect(() => {
     let isMounted = true;
+    const host = ytHostRef.current;
+    const previousReady = window.onYouTubeIframeAPIReady;
+    let readyHandler: (() => void) | undefined;
     function setupPlayer() {
-      if (!isMounted) return;
+      if (!isMounted || !host) return;
       if (window.YT && window.YT.Player && !ytPlayerRef.current) {
         try {
-          ytPlayerRef.current = new window.YT.Player("yt-player-target", {
+          // The API replaces its target with an iframe. Keep that target inside a
+          // React-owned host so StrictMode can safely destroy and recreate it.
+          const target = document.createElement("div");
+          host.replaceChildren(target);
+          ytPlayerRef.current = new window.YT.Player(target, {
             height: "100%",
             width: "100%",
             playerVars: {
@@ -398,6 +410,8 @@ export default function App() {
               },
               onStateChange: (event: any) => {
                 if (!isMounted) return;
+                const eventVideoId = event.target.getVideoData?.()?.video_id;
+                if (eventVideoId && eventVideoId !== currentTrackRef.current.youtubeId) return;
                 if (event.data === window.YT.PlayerState.PLAYING) {
                   if (playbackWatchdog.current) {
                     clearTimeout(playbackWatchdog.current);
@@ -406,7 +420,7 @@ export default function App() {
                   try {
                     const d = event.target.getDuration();
                     if (d > 0 && d < MIN_FULL_SONG_SECONDS) {
-                      reportUnavailable("This linked video is shorter than four minutes.");
+                      sourceFailureRef.current("The linked video is shorter than four minutes.");
                       return;
                     }
                     if (d >= MIN_FULL_SONG_SECONDS) {
@@ -418,7 +432,8 @@ export default function App() {
                     playbackWatchdog.current = setTimeout(() => {
                       const actual = event.target.getDuration?.() ?? 0;
                       if (actual < MIN_FULL_SONG_SECONDS) {
-                        reportUnavailable(actual > 0 ? "This linked video is shorter than four minutes." : "Could not verify this video's length.");
+                        if (actual > 0) sourceFailureRef.current("The linked video is shorter than four minutes.");
+                        else reportUnavailable("Could not verify this video's length.");
                       } else {
                         durationVerifiedRef.current = true;
                         setDuration(actual);
@@ -443,8 +458,19 @@ export default function App() {
               },
               onError: (err: any) => {
                 const code = err?.data;
+                const failedVideoId = err?.target?.getVideoData?.()?.video_id;
+                if (failedVideoId && failedVideoId !== currentTrackRef.current.youtubeId) return;
                 console.warn("YouTube player error/restriction:", code);
-                reportUnavailable("This video cannot play here. Open it on YouTube or choose another song.");
+                if (code === 100 || code === 101 || code === 150) {
+                  sourceFailureRef.current("This song's YouTube video cannot be embedded.");
+                } else {
+                  reportUnavailable(code === 153
+                    ? "YouTube requires browser identification for embedded playback. Open this song on YouTube."
+                    : "This video cannot play here. Open it on YouTube or choose another song.");
+                }
+              },
+              onAutoplayBlocked: () => {
+                reportUnavailable("Your browser blocked playback. Press Play again or open the song on YouTube.");
               },
             },
           });
@@ -457,18 +483,26 @@ export default function App() {
     if (window.YT && window.YT.Player) {
       setupPlayer();
     } else {
-      const prevReady = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        if (prevReady) prevReady();
+      readyHandler = () => {
+        if (previousReady) previousReady();
         setupPlayer();
       };
+      window.onYouTubeIframeAPIReady = readyHandler;
     }
 
     return () => {
       isMounted = false;
+      if (readyHandler && window.onYouTubeIframeAPIReady === readyHandler) {
+        window.onYouTubeIframeAPIReady = previousReady;
+      }
       if (playbackWatchdog.current) {
         clearTimeout(playbackWatchdog.current);
+        playbackWatchdog.current = null;
       }
+      pendingPlayRef.current = null;
+      try { ytPlayerRef.current?.destroy?.(); } catch {}
+      ytPlayerRef.current = null;
+      host?.replaceChildren();
     };
   }, []);
 
@@ -478,6 +512,8 @@ export default function App() {
     const interval = setInterval(() => {
       try {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
+          const loadedVideoId = ytPlayerRef.current.getVideoData?.()?.video_id;
+          if (loadedVideoId && loadedVideoId !== currentTrackRef.current.youtubeId) return;
           const cur = ytPlayerRef.current.getCurrentTime();
           if (typeof cur === "number" && !isNaN(cur)) {
             recordPlaybackTime(cur);
@@ -485,7 +521,7 @@ export default function App() {
           }
           const dur = ytPlayerRef.current.getDuration();
           if (dur > 0 && dur < MIN_FULL_SONG_SECONDS) {
-            reportUnavailable("This linked video is shorter than four minutes.");
+            sourceFailureRef.current("The linked video is shorter than four minutes.");
             return;
           }
           if (dur >= MIN_FULL_SONG_SECONDS) durationVerifiedRef.current = true;
@@ -529,6 +565,30 @@ export default function App() {
     setPlaying(false);
     showToast(message);
   }
+
+  function skipUnavailableSource(message: string) {
+    const failed = currentTrackRef.current;
+    if (rejectedTrackIdsRef.current.has(failed.id)) return;
+    rejectedTrackIdsRef.current.add(failed.id);
+    const active = sessionRef.current;
+    reportUnavailable(message);
+    const nextIndex = active.queue.findIndex((item, index) =>
+      index > active.currentIndex && !rejectedTrackIdsRef.current.has(item.trackId),
+    );
+    if (nextIndex < 0) {
+      showToast(`${message} No more songs in this journey can be tried.`);
+      return;
+    }
+    const nextItem = active.queue[nextIndex];
+    const nextTrack = CATALOG_MAP[nextItem.trackId] || tracks[nextItem.trackId];
+    if (!nextTrack) return;
+    const updated = { ...active, currentIndex: nextIndex, status: "active" as const };
+    sessionRef.current = updated;
+    setSession(updated);
+    startPlayback(nextTrack);
+    showToast(`${failed.title} could not play here. Trying ${nextTrack.title}.`);
+  }
+  sourceFailureRef.current = skipUnavailableSource;
 
   // Start only a full-length video. The player confirms both playback and duration.
   function startFullVideo(track: Track, startSeconds = 0) {
@@ -637,7 +697,7 @@ export default function App() {
 
     if (targetTrack) {
       startPlayback(targetTrack);
-      showToast(`Playing ${targetTrack.title} (${targetTrack.language})`);
+      showToast(`Loading ${targetTrack.title} (${targetTrack.language})`);
     }
   }
 
@@ -920,7 +980,7 @@ export default function App() {
       audioRef.current?.pause();
       try { ytPlayerRef.current?.pauseVideo?.(); } catch {}
       const taste = buildTasteProfile(LONG_CATALOG_TRACKS, listeningRecords, new Set(likedTrackIDs));
-      const data = generateSequenceFromCatalog(start, target, count, journeyLanguage, new Set(), taste);
+      const data = generateSequenceFromCatalog(start, target, count, journeyLanguage, new Set(rejectedTrackIdsRef.current), taste);
       setSession(data);
       setSessionMood({ ...start, source: "manual" });
       setAuditEvents([]);
@@ -999,7 +1059,7 @@ export default function App() {
     lastSampleAtRef.current = performance.now();
     setProgress(targetTime);
 
-    if (playbackMode === "full" && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+    if (playbackMode === "full" && durationVerifiedRef.current && !ytBlocked && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
       try {
         ytPlayerRef.current.seekTo(targetTime, true);
         return;
@@ -1072,6 +1132,7 @@ export default function App() {
         </div>
         <div className="mini-player-viewport">
           <div
+            ref={ytHostRef}
             id="yt-player-target"
             style={{ width: "100%", height: "100%", display: playbackMode === "full" && !ytBlocked ? "block" : "none" }}
           />
