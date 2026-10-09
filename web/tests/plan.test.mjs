@@ -6,7 +6,7 @@ const tracks = [
   { id: 'low', genre: 'ambient', artist: 'a', language: 'English', mood: { valence: 0.1, arousal: 0.1 }, audioUrl: '/low.wav' },
   { id: 'middle', genre: 'ambient', artist: 'b', language: 'English', mood: { valence: 0.5, arousal: 0.5 }, audioUrl: '/middle.wav' },
   { id: 'high', genre: 'pulse', artist: 'c', language: 'English', mood: { valence: 0.9, arousal: 0.9 }, audioUrl: '/high.wav' },
-  { id: 'tamil', genre: 'pulse', artist: 'd', language: 'Tamil', mood: { valence: 0.8, arousal: 0.8 }, youtubeId: '12345678901' },
+  { id: 'tamil', genre: 'pulse', artist: 'd', language: 'Tamil', mood: { valence: 0.8, arousal: 0.8 }, audioUrl: '/tamil.wav' },
 ];
 
 test('follows the chosen target with distinct tracks', () => {
@@ -39,12 +39,12 @@ test('longer listening and likes favor taste among equal-mood tracks', () => {
   const queue = planJourney(options, { valence: 0.5, arousal: 0.5 }, { valence: 0.5, arousal: 0.5 }, 1, 'All', new Set(), taste);
   assert.equal(queue[0].trackId, 'jazz');
 });
-test('long-song candidates exclude previews and repeated video IDs', () => {
+test('long-song candidates exclude previews and repeated audio URLs', () => {
   const candidates = selectLongTrackCandidates([
-    { id: 'short', youtubeId: 'a', durationSeconds: 179 },
-    { id: 'long', youtubeId: 'b', durationSeconds: 260 },
-    { id: 'fake-version', youtubeId: 'b', durationSeconds: 310 },
-    { id: 'no-video', durationSeconds: 300 },
+    { id: 'short', audioUrl: 'https://archive.org/download/a/short.mp3', durationSeconds: 179 },
+    { id: 'long', audioUrl: 'https://archive.org/download/a/long.mp3', durationSeconds: 260 },
+    { id: 'fake-version', audioUrl: 'https://archive.org/download/a/long.mp3', durationSeconds: 310 },
+    { id: 'no-audio', durationSeconds: 300 },
   ]);
   assert.deepEqual(candidates.map((track) => track.id), ['long']);
 });

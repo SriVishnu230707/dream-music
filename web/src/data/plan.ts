@@ -6,7 +6,6 @@ export type PlanTrack = {
   language?: string;
   mood?: MoodPoint;
   audioUrl?: string;
-  youtubeId?: string;
 };
 export type PlannedItem = {
   trackId: string;
@@ -20,11 +19,15 @@ const clamp = (value: number) => Math.max(0, Math.min(1, value));
 
 export const MIN_FULL_SONG_SECONDS = 240;
 
-export function selectLongTrackCandidates<T extends { youtubeId?: string; durationSeconds: number }>(tracks: T[]): T[] {
+export function selectLongTrackCandidates<T extends { audioUrl?: string; durationSeconds: number }>(tracks: T[]): T[] {
   const seen = new Set<string>();
   return tracks.filter((track) => {
-    if (!track.youtubeId || seen.has(track.youtubeId)) return false;
-    seen.add(track.youtubeId);
+    if (!track.audioUrl || seen.has(track.audioUrl)) return false;
+    let source: URL;
+    try { source = new URL(track.audioUrl); } catch { return false; }
+    if (source.protocol !== 'https:' || source.hostname !== 'archive.org' ||
+        !source.pathname.startsWith('/download/')) return false;
+    seen.add(track.audioUrl);
     return Number.isFinite(track.durationSeconds) && track.durationSeconds >= MIN_FULL_SONG_SECONDS;
   });
 }
@@ -72,7 +75,7 @@ export function planJourney(
   const eligible = tracks.filter((track) =>
     (language === "All" || track.language === language) &&
     !excludedIds.has(track.id) &&
-    (Boolean(track.audioUrl) || Boolean(track.youtubeId)) &&
+    Boolean(track.audioUrl) &&
     track.mood &&
     Number.isFinite(track.mood.valence) &&
     Number.isFinite(track.mood.arousal) &&

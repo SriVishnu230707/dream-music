@@ -1,0 +1,434 @@
+[
+  {
+    "id": "archive-yarn020-1",
+    "title": "December",
+    "artist": "Valya Kan",
+    "album": "December / Memories",
+    "genre": "Downtempo",
+    "language": "Instrumental",
+    "durationSeconds": 317,
+    "attribution": "Valya Kan — December · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn020",
+    "audioUrl": "https://archive.org/download/yarn020/01-Valya_Kan-December.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn020",
+    "mood": {
+      "valence": 0.42,
+      "arousal": 0.34
+    }
+  },
+  {
+    "id": "archive-yarn020-2",
+    "title": "Memories",
+    "artist": "Valya Kan",
+    "album": "December / Memories",
+    "genre": "Downtempo",
+    "language": "Instrumental",
+    "durationSeconds": 389,
+    "attribution": "Valya Kan — Memories · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn020",
+    "audioUrl": "https://archive.org/download/yarn020/02-Valya_Kan-Memories.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn020",
+    "mood": {
+      "valence": 0.63,
+      "arousal": 0.38
+    }
+  },
+  {
+    "id": "archive-yarn022-1",
+    "title": "Arf",
+    "artist": "Raptom Snig",
+    "album": "Raptom Snig – Arf / Vidom [YARN022]",
+    "genre": "Electronic",
+    "language": "Instrumental",
+    "durationSeconds": 424,
+    "attribution": "Raptom Snig — Arf · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn022",
+    "audioUrl": "https://archive.org/download/yarn022/01-Raptom_Snig-Arf.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn022",
+    "mood": {
+      "valence": 0.7,
+      "arousal": 0.72
+    }
+  },
+  {
+    "id": "archive-yarn022-2",
+    "title": "Vidom",
+    "artist": "Raptom Snig",
+    "album": "Raptom Snig – Arf / Vidom [YARN022]",
+    "genre": "Electronic",
+    "language": "Instrumental",
+    "durationSeconds": 345,
+    "attribution": "Raptom Snig — Vidom · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn022",
+    "audioUrl": "https://archive.org/download/yarn022/02-Raptom_Snig-Vidom.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn022",
+    "mood": {
+      "valence": 0.58,
+      "arousal": 0.65
+    }
+  },
+  {
+    "id": "archive-yarn013-1",
+    "title": "Aimlessly Wandering",
+    "artist": "Mehta",
+    "album": "Mehta - Aimlessly Wandering / Bngrv [YARN013]",
+    "genre": "Electronic",
+    "language": "Instrumental",
+    "durationSeconds": 631,
+    "attribution": "Mehta — Aimlessly Wandering · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn013",
+    "audioUrl": "https://archive.org/download/yarn013/01-Mehta-Aimlessly_Wandering.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn013",
+    "mood": {
+      "valence": 0.48,
+      "arousal": 0.76
+    }
+  },
+  {
+    "id": "archive-yarn013-2",
+    "title": "Bngrv",
+    "artist": "Mehta",
+    "album": "Mehta - Aimlessly Wandering / Bngrv [YARN013]",
+    "genre": "Electronic",
+    "language": "Instrumental",
+    "durationSeconds": 510,
+    "attribution": "Mehta — Bngrv · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/yarn013",
+    "audioUrl": "https://archive.org/download/yarn013/02-Mehta-Bngrv.mp3",
+    "artworkUrl": "https://archive.org/services/img/yarn013",
+    "mood": {
+      "valence": 0.66,
+      "arousal": 0.82
+    }
+  },
+  {
+    "id": "archive-aquatone-mental-images-1",
+    "title": "Astral Wind",
+    "artist": "Aquatone",
+    "album": "Aquatone - Mental Images [USC-WR-1707.0368]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 290,
+    "attribution": "Aquatone — Astral Wind · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-mental-images",
+    "audioUrl": "https://archive.org/download/aquatone-mental-images/01.Astral%20Wind.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-mental-images",
+    "mood": {
+      "valence": 0.38,
+      "arousal": 0.2
+    }
+  },
+  {
+    "id": "archive-aquatone-mental-images-2",
+    "title": "Mental Images",
+    "artist": "Aquatone",
+    "album": "Aquatone - Mental Images [USC-WR-1707.0368]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 383,
+    "attribution": "Aquatone — Mental Images · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-mental-images",
+    "audioUrl": "https://archive.org/download/aquatone-mental-images/02.Mental%20Images.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-mental-images",
+    "mood": {
+      "valence": 0.54,
+      "arousal": 0.25
+    }
+  },
+  {
+    "id": "archive-aquatone-mental-images-3",
+    "title": "Sirius",
+    "artist": "Aquatone",
+    "album": "Aquatone - Mental Images [USC-WR-1707.0368]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 287,
+    "attribution": "Aquatone — Sirius · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-mental-images",
+    "audioUrl": "https://archive.org/download/aquatone-mental-images/03.Sirius.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-mental-images",
+    "mood": {
+      "valence": 0.58,
+      "arousal": 0.28
+    }
+  },
+  {
+    "id": "archive-aquatone-mental-images-4",
+    "title": "Sacral Chakra",
+    "artist": "Aquatone",
+    "album": "Aquatone - Mental Images [USC-WR-1707.0368]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 441,
+    "attribution": "Aquatone — Sacral Chakra · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-mental-images",
+    "audioUrl": "https://archive.org/download/aquatone-mental-images/04.Sacral%20Chakra.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-mental-images",
+    "mood": {
+      "valence": 0.42,
+      "arousal": 0.18
+    }
+  },
+  {
+    "id": "archive-aquatone-synthetic-clouds-1",
+    "title": "Singing Dunes",
+    "artist": "Aquatone",
+    "album": "Aquatone - Synthetic Clouds [USC-WR-1712.0391]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 266,
+    "attribution": "Aquatone — Singing Dunes · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-synthetic-clouds",
+    "audioUrl": "https://archive.org/download/aquatone-synthetic-clouds/01.Singing%20Dunes.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-synthetic-clouds",
+    "mood": {
+      "valence": 0.57,
+      "arousal": 0.25
+    }
+  },
+  {
+    "id": "archive-aquatone-synthetic-clouds-2",
+    "title": "Fata Morgana",
+    "artist": "Aquatone",
+    "album": "Aquatone - Synthetic Clouds [USC-WR-1712.0391]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 307,
+    "attribution": "Aquatone — Fata Morgana · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-synthetic-clouds",
+    "audioUrl": "https://archive.org/download/aquatone-synthetic-clouds/03.Fata%20Morgana.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-synthetic-clouds",
+    "mood": {
+      "valence": 0.63,
+      "arousal": 0.32
+    }
+  },
+  {
+    "id": "archive-aquatone-synthetic-clouds-3",
+    "title": "Synthetic Clouds",
+    "artist": "Aquatone",
+    "album": "Aquatone - Synthetic Clouds [USC-WR-1712.0391]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 318,
+    "attribution": "Aquatone — Synthetic Clouds · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-synthetic-clouds",
+    "audioUrl": "https://archive.org/download/aquatone-synthetic-clouds/04.Synthetic%20Clouds.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-synthetic-clouds",
+    "mood": {
+      "valence": 0.53,
+      "arousal": 0.3
+    }
+  },
+  {
+    "id": "archive-aquatone-synthetic-clouds-4",
+    "title": "Radio Waves",
+    "artist": "Aquatone",
+    "album": "Aquatone - Synthetic Clouds [USC-WR-1712.0391]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 267,
+    "attribution": "Aquatone — Radio Waves · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/aquatone-synthetic-clouds",
+    "audioUrl": "https://archive.org/download/aquatone-synthetic-clouds/05.Radio%20Waves.mp3",
+    "artworkUrl": "https://archive.org/services/img/aquatone-synthetic-clouds",
+    "mood": {
+      "valence": 0.48,
+      "arousal": 0.27
+    }
+  },
+  {
+    "id": "archive-derek-nigell-distant-ocean-1",
+    "title": "Sleepy Ocean",
+    "artist": "Derek Nigell",
+    "album": "Derek Nigell - Distant Ocean [USC-WR-1712.0393]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 440,
+    "attribution": "Derek Nigell — Sleepy Ocean · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/derek-nigell-distant-ocean",
+    "audioUrl": "https://archive.org/download/derek-nigell-distant-ocean/01.Sleepy%20Ocean.mp3",
+    "artworkUrl": "https://archive.org/services/img/derek-nigell-distant-ocean",
+    "mood": {
+      "valence": 0.36,
+      "arousal": 0.18
+    }
+  },
+  {
+    "id": "archive-derek-nigell-distant-ocean-2",
+    "title": "Waves and Blue",
+    "artist": "Derek Nigell",
+    "album": "Derek Nigell - Distant Ocean [USC-WR-1712.0393]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 437,
+    "attribution": "Derek Nigell — Waves and Blue · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/derek-nigell-distant-ocean",
+    "audioUrl": "https://archive.org/download/derek-nigell-distant-ocean/02.Waves%20and%20Blue.mp3",
+    "artworkUrl": "https://archive.org/services/img/derek-nigell-distant-ocean",
+    "mood": {
+      "valence": 0.48,
+      "arousal": 0.24
+    }
+  },
+  {
+    "id": "archive-derek-nigell-distant-ocean-3",
+    "title": "At Sundown",
+    "artist": "Derek Nigell",
+    "album": "Derek Nigell - Distant Ocean [USC-WR-1712.0393]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 435,
+    "attribution": "Derek Nigell — At Sundown · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/derek-nigell-distant-ocean",
+    "audioUrl": "https://archive.org/download/derek-nigell-distant-ocean/03.At%20Sundown.mp3",
+    "artworkUrl": "https://archive.org/services/img/derek-nigell-distant-ocean",
+    "mood": {
+      "valence": 0.61,
+      "arousal": 0.28
+    }
+  },
+  {
+    "id": "archive-derek-nigell-distant-ocean-4",
+    "title": "Storm",
+    "artist": "Derek Nigell",
+    "album": "Derek Nigell - Distant Ocean [USC-WR-1712.0393]",
+    "genre": "Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 522,
+    "attribution": "Derek Nigell — Storm · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/derek-nigell-distant-ocean",
+    "audioUrl": "https://archive.org/download/derek-nigell-distant-ocean/04.Storm.mp3",
+    "artworkUrl": "https://archive.org/services/img/derek-nigell-distant-ocean",
+    "mood": {
+      "valence": 0.3,
+      "arousal": 0.52
+    }
+  },
+  {
+    "id": "archive-bof060-1",
+    "title": "Light and Shadow",
+    "artist": "Grove of Whispers",
+    "album": "Grove of Whispers - The Sheltering Sky",
+    "genre": "Dark Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 506,
+    "attribution": "Grove of Whispers — Light and Shadow · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/bof060",
+    "audioUrl": "https://archive.org/download/bof060/01_Grove_of_Whispers_-_Light_and_Shadow.mp3",
+    "artworkUrl": "https://archive.org/services/img/bof060",
+    "mood": {
+      "valence": 0.3,
+      "arousal": 0.2
+    }
+  },
+  {
+    "id": "archive-bof060-2",
+    "title": "Black Star",
+    "artist": "Grove of Whispers",
+    "album": "Grove of Whispers - The Sheltering Sky",
+    "genre": "Dark Ambient",
+    "language": "Instrumental",
+    "durationSeconds": 731,
+    "attribution": "Grove of Whispers — Black Star · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/bof060",
+    "audioUrl": "https://archive.org/download/bof060/02_Grove_of_Whispers_-_Black_Star.mp3",
+    "artworkUrl": "https://archive.org/services/img/bof060",
+    "mood": {
+      "valence": 0.2,
+      "arousal": 0.28
+    }
+  },
+  {
+    "id": "archive-argrec18-1",
+    "title": "03 John Lithium - Confrontation Core",
+    "artist": "John Lithium",
+    "album": "Lithium Toolbox Volume II (ARGREC18)",
+    "genre": "Industrial",
+    "language": "Instrumental",
+    "durationSeconds": 244,
+    "attribution": "John Lithium — 03 John Lithium - Confrontation Core · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/ARGREC18",
+    "audioUrl": "https://archive.org/download/ARGREC18/03JohnLithium-ConfrontationCore.mp3",
+    "artworkUrl": "https://archive.org/services/img/ARGREC18",
+    "mood": {
+      "valence": 0.28,
+      "arousal": 0.84
+    }
+  },
+  {
+    "id": "archive-argrec18-2",
+    "title": "05 John Lithium - Master Mind Cleanser",
+    "artist": "John Lithium",
+    "album": "Lithium Toolbox Volume II (ARGREC18)",
+    "genre": "Industrial",
+    "language": "Instrumental",
+    "durationSeconds": 263,
+    "attribution": "John Lithium — 05 John Lithium - Master Mind Cleanser · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/ARGREC18",
+    "audioUrl": "https://archive.org/download/ARGREC18/05JohnLithium-MasterMindCleanser.mp3",
+    "artworkUrl": "https://archive.org/services/img/ARGREC18",
+    "mood": {
+      "valence": 0.43,
+      "arousal": 0.88
+    }
+  },
+  {
+    "id": "archive-argrec18-3",
+    "title": "07 John Lithium - Atmospheric Chamber",
+    "artist": "John Lithium",
+    "album": "Lithium Toolbox Volume II (ARGREC18)",
+    "genre": "Industrial",
+    "language": "Instrumental",
+    "durationSeconds": 382,
+    "attribution": "John Lithium — 07 John Lithium - Atmospheric Chamber · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/ARGREC18",
+    "audioUrl": "https://archive.org/download/ARGREC18/07JohnLithium-AtmosphericChamber.mp3",
+    "artworkUrl": "https://archive.org/services/img/ARGREC18",
+    "mood": {
+      "valence": 0.35,
+      "arousal": 0.55
+    }
+  },
+  {
+    "id": "archive-argrec18-4",
+    "title": "08 John Lithium - Invocation III",
+    "artist": "John Lithium",
+    "album": "Lithium Toolbox Volume II (ARGREC18)",
+    "genre": "Industrial",
+    "language": "Instrumental",
+    "durationSeconds": 244,
+    "attribution": "John Lithium — 08 John Lithium - Invocation III · CC BY 4.0 · Internet Archive",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://archive.org/details/ARGREC18",
+    "audioUrl": "https://archive.org/download/ARGREC18/08JohnLithium-InvocationIii.mp3",
+    "artworkUrl": "https://archive.org/services/img/ARGREC18",
+    "mood": {
+      "valence": 0.5,
+      "arousal": 0.76
+    }
+  }
+]
